@@ -7,6 +7,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
+import { verifyMessage } from 'ethers';
 import { verifyConcordiumProof, generateChallenge, isValidProofStructure } from './verifier.js';
 
 // Load environment variables
@@ -340,6 +341,95 @@ app.post('/api/verify-terms-acceptance', async (req: Request, res: Response) => 
   }
 });
 
+/**
+ * EVM Terms Acceptance Verification
+ */
+app.post('/api/verify-evm-terms-acceptance', async (req: Request, res: Response) => {
+  try {
+    const { signature, message, termsVersion, termsHash, address, timestamp } = req.body;
+
+    if (!signature || !message || !termsVersion || !termsHash || !address || !timestamp) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields',
+        required: ['signature', 'message', 'termsVersion', 'termsHash', 'address', 'timestamp']
+      });
+    }
+
+    // Validate terms version
+    const CURRENT_TERMS_VERSION = '1.0';
+    if (termsVersion !== CURRENT_TERMS_VERSION) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid terms version. Current version is ${CURRENT_TERMS_VERSION}`,
+        verified: false
+      });
+    }
+
+    // Validate timestamp (not too old, not in future)
+    const signatureTime = new Date(timestamp).getTime();
+    const now = Date.now();
+    const fiveMinutesAgo = now - (5 * 60 * 1000);
+    const oneMinuteAhead = now + (60 * 1000);
+
+    if (signatureTime < fiveMinutesAgo) {
+      return res.status(400).json({
+        success: false,
+        error: 'Terms signature has expired. Please sign again.',
+        verified: false
+      });
+    }
+
+    if (signatureTime > oneMinuteAhead) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid timestamp',
+        verified: false
+      });
+    }
+
+    // Verify EVM signature cryptographically
+    try {
+      const recoveredAddress = verifyMessage(message, signature);
+      const isValid = recoveredAddress.toLowerCase() === address.toLowerCase();
+
+      if (!isValid) {
+        return res.status(400).json({
+          success: false,
+          error: 'Signature verification failed - recovered address does not match',
+          verified: false,
+          recoveredAddress,
+          expectedAddress: address
+        });
+      }
+
+      res.json({
+        success: true,
+        verified: true,
+        address,
+        recoveredAddress,
+        termsVersion,
+        timestamp: new Date().toISOString()
+      });
+
+    } catch (signatureError: any) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid signature: ${signatureError.message}`,
+        verified: false
+      });
+    }
+
+  } catch (error: any) {
+    console.error('EVM terms verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error',
+      verified: false
+    });
+  }
+});
+
 // Error handling middleware
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Error:', err);
@@ -368,6 +458,7 @@ const server = app.listen(PORT, () => {
   console.log('  POST /api/verify-identity');
   console.log('  POST /api/verify-signature');
   console.log('  POST /api/verify-terms-acceptance');
+  console.log('  POST /api/verify-evm-terms-acceptance');
   console.log('  GET  /api/verification-status/:id');
   console.log('');
 });

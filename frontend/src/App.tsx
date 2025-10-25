@@ -6,7 +6,7 @@ import { InjectedConnector } from 'wagmi/connectors/injected';
 import { MetaMaskConnector } from 'wagmi/connectors/metaMask';
 import { useAccount, useConnect, useSignMessage, useDisconnect } from 'wagmi';
 import { detectConcordiumProvider, WalletApi } from '@concordium/browser-wallet-api-helpers';
-import { TermsAndConditions } from './TermsAndConditions';
+import { TermsAndConditionsCombined } from './TermsAndConditionsCombined';
 
 // Extend Window interface for ethereum
 declare global {
@@ -103,7 +103,8 @@ function VerificationDApp(): JSX.Element {
   const [loading, setLoading] = useState<boolean>(false);
   const [metaMaskDetected, setMetaMaskDetected] = useState<boolean>(false);
   const [showTermsModal, setShowTermsModal] = useState<boolean>(false);
-  const [termsSignature, setTermsSignature] = useState<any>(null);
+  const [concordiumTermsSignature, setConcordiumTermsSignature] = useState<any>(null);
+  const [evmTermsSignature, setEvmTermsSignature] = useState<any>(null);
 
   // Detect MetaMask on mount
   useEffect(() => {
@@ -353,48 +354,22 @@ function VerificationDApp(): JSX.Element {
       return;
     }
 
-    // Show Terms & Conditions modal first
+    // Show combined Terms & Conditions modal
     setShowTermsModal(true);
   };
 
-  const handleTermsAccepted = async (signature: any) => {
+  const handleBothTermsAccepted = async (concordiumSig: any, evmSig: any) => {
     setShowTermsModal(false);
-    setTermsSignature(signature);
-    setStatus('Verifying terms signature with backend...');
+    setConcordiumTermsSignature(concordiumSig);
+    setEvmTermsSignature(evmSig);
+    setStatus('✅ Both wallets signed and verified!\n\nProceeding with identity verification...');
     setLoading(true);
 
-    try {
-      // Verify terms signature with backend
-      const termsVerifyResponse = await fetch('/api/verify-terms-acceptance', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(signature),
-      });
+    // Wait a moment to show the success message
+    await new Promise(resolve => setTimeout(resolve, 1500));
 
-      const termsResult = await termsVerifyResponse.json();
-
-      if (!termsVerifyResponse.ok) {
-        throw new Error(termsResult.error || 'Terms verification failed');
-      }
-      
-      if (!termsResult.success || !termsResult.verified) {
-        throw new Error(termsResult.error || 'Terms signature verification failed - signature is invalid');
-      }
-
-      // Show success message with verification details
-      setStatus(`✅ Terms signature verified successfully!\n\nAccount: ${termsResult.accountAddress}\nTerms Version: ${termsResult.termsVersion}\n\nProceeding with identity verification...`);
-
-      // Wait a moment to show the success message
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      // Now proceed with the original verification flow
-      await proceedWithIdentityVerification();
-
-    } catch (err: any) {
-      setStatus(`❌ Terms verification failed: ${err?.message || String(err)}\n\nPlease try signing the terms again.`);
-      setLoading(false);
-      setTermsSignature(null);
-    }
+    // Proceed with identity verification
+    await proceedWithIdentityVerification();
   };
 
   const handleTermsCancelled = () => {
@@ -411,25 +386,35 @@ function VerificationDApp(): JSX.Element {
         {
           idQualifier: {
             type: 'cred' as const,
-            issuers: [] as number[]
+            issuers: [0, 1, 2, 3, 4, 5, 6, 7] as number[]  // Accept identity from any testnet issuer
           },
           statement: [
             { type: 'RevealAttribute' as const, attributeTag: 'firstName' as const },
             { type: 'RevealAttribute' as const, attributeTag: 'lastName' as const },
+            { type: 'RevealAttribute' as const, attributeTag: 'nationality' as const },
             { 
               type: 'AttributeInRange' as const, 
               attributeTag: 'dob' as const,
               lower: '18000101',
               upper: getEighteenYearsAgoDate().replace(/-/g, '')
-            },
-            { 
-              type: 'AttributeInSet' as const, 
-              attributeTag: 'nationality' as const,
-              set: ['DK', 'DE', 'GB']
             }
           ]
         }
       ];
+
+      // Get challenge from backend
+      setStatus('Requesting challenge from backend...');
+      const challengeResponse = await fetch('/api/challenge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      if (!challengeResponse.ok) {
+        throw new Error('Failed to get challenge from backend');
+      }
+
+      const challengeData = await challengeResponse.json();
+      const { challenge, sessionId } = challengeData;
 
       setStatus('Waiting for Concordium proof...');
 
@@ -437,7 +422,7 @@ function VerificationDApp(): JSX.Element {
 
       try {
         concordiumProof = await concordiumProvider.requestVerifiablePresentation(
-          'VeriLoan Identity Verification',
+          challenge,
           zkpStatement
         );
 
@@ -464,7 +449,9 @@ function VerificationDApp(): JSX.Element {
         concordiumAddress,
         evmSignature,
         evmAddress,
-        termsAcceptance: termsSignature,
+        sessionId,
+        concordiumTermsAcceptance: concordiumTermsSignature,
+        evmTermsAcceptance: evmTermsSignature,
       };
 
       const resp = await fetch('/api/verify-identity', {
@@ -489,10 +476,11 @@ function VerificationDApp(): JSX.Element {
   return (
     <div style={styles.container}>
       {showTermsModal && (
-        <TermsAndConditions
-          provider={concordiumProvider}
-          accountAddress={concordiumAddress}
-          onAccepted={handleTermsAccepted}
+        <TermsAndConditionsCombined
+          concordiumProvider={concordiumProvider}
+          concordiumAddress={concordiumAddress}
+          evmAddress={evmAddress}
+          onBothAccepted={handleBothTermsAccepted}
           onCancel={handleTermsCancelled}
         />
       )}
