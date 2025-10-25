@@ -5,7 +5,7 @@
  * from the Concordium blockchain identity layer.
  */
 
-import { 
+import {
   VerifiablePresentation
 } from '@concordium/web-sdk';
 
@@ -85,43 +85,97 @@ export async function verifyConcordiumProof(
       };
     }
 
-    try {
-      if (!proofResult.proof || !Array.isArray(proofResult.proof)) {
-        throw new Error('Invalid proof structure');
+    // Handle both legacy and modern proof formats
+    console.log('Proof type:', (proofResult as any).type);
+    console.log('Has verifiableCredential:', 'verifiableCredential' in proofResult);
+    console.log('Proof structure:', typeof proofResult.proof);
+
+    // Modern format: proof is an object, not array
+    // Legacy format: proof is an array
+    const isModernFormat = !Array.isArray(proofResult.proof);
+
+    if (isModernFormat) {
+      // Modern Verifiable Presentation format
+      const modernProof = proofResult as any;
+
+      if (!modernProof.verifiableCredential || !Array.isArray(modernProof.verifiableCredential)) {
+        return {
+          isValid: false,
+          uniqueUserId: null,
+          revealedAttributes: null,
+          error: 'Invalid modern proof structure - missing verifiableCredential'
+        };
       }
 
-      const proofArray = proofResult.proof as any[];
-      if (proofArray.length === 0) {
-        throw new Error('Empty proof array');
+      if (modernProof.verifiableCredential.length === 0) {
+        return {
+          isValid: false,
+          uniqueUserId: null,
+          revealedAttributes: null,
+          error: 'Empty verifiableCredential array'
+        };
       }
 
-      const proofData = proofResult.proof[0];
-      
-      if (!proofData) {
-        throw new Error('No proof data found');
-      }
+      console.log('Using modern proof format');
+    } else {
+      // Legacy format validation
+      try {
+        if (!proofResult.proof || !Array.isArray(proofResult.proof)) {
+          throw new Error('Invalid proof structure');
+        }
 
-    } catch (verifyError: any) {
-      return {
-        isValid: false,
-        uniqueUserId: null,
-        revealedAttributes: null,
-        error: `Verification failed: ${verifyError.message}`
-      };
+        const proofArray = proofResult.proof as any[];
+        if (proofArray.length === 0) {
+          throw new Error('Empty proof array');
+        }
+
+        const proofData = proofResult.proof[0];
+
+        if (!proofData) {
+          throw new Error('No proof data found');
+        }
+
+      } catch (verifyError: any) {
+        return {
+          isValid: false,
+          uniqueUserId: null,
+          revealedAttributes: null,
+          error: `Verification failed: ${verifyError.message}`
+        };
+      }
     }
 
     let uniqueUserId: string | null = null;
-    
+
     try {
-      const proofArray = proofResult.proof as any[];
-      const firstProof = proofArray[0];
-      
-      if (firstProof && firstProof.credential) {
-        uniqueUserId = String(firstProof.credential);
-      } else if (proofResult.presentationContext) {
+      const modernProof = proofResult as any;
+
+      if (isModernFormat && modernProof.verifiableCredential && modernProof.verifiableCredential[0]) {
+        // Extract from modern format
+        const credential = modernProof.verifiableCredential[0];
+        if (credential.credentialSubject && credential.credentialSubject.id) {
+          uniqueUserId = credential.credentialSubject.id;
+        }
+      } else if (!isModernFormat) {
+        // Extract from legacy format
+        const legacyProof = proofResult as any;
+        if (Array.isArray(legacyProof.proof)) {
+          const proofArray = legacyProof.proof;
+          const firstProof = proofArray[0];
+
+          if (firstProof && firstProof.credential) {
+            uniqueUserId = String(firstProof.credential);
+          }
+        }
+      }
+
+      // Fallback: generate from proof hash
+      if (!uniqueUserId && proofResult.presentationContext) {
         const proofHash = Buffer.from(JSON.stringify(proofResult)).toString('base64').substring(0, 32);
         uniqueUserId = proofHash;
-      } else {
+      }
+
+      if (!uniqueUserId) {
         throw new Error('No credential ID found in proof');
       }
     } catch (extractError: any) {
@@ -134,29 +188,65 @@ export async function verifyConcordiumProof(
     }
 
     const revealedAttributes: Record<string, any> = {};
-    
+
     try {
-      const proofData = proofResult.proof[0];
-      
-      if (proofData && proofData.statement) {
-        for (const item of proofData.statement) {
-          if (item.type === 'RevealAttribute' && item.attributeTag) {
-            if (proofData.revealedAttributes && proofData.revealedAttributes[item.attributeTag]) {
-              revealedAttributes[item.attributeTag] = proofData.revealedAttributes[item.attributeTag];
+      const modernProof = proofResult as any;
+
+      if (isModernFormat && modernProof.verifiableCredential && modernProof.verifiableCredential[0]) {
+        // Extract from modern format
+        const credential = modernProof.verifiableCredential[0];
+
+        if (credential.credentialSubject && credential.credentialSubject.proof) {
+          const proofValue = credential.credentialSubject.proof.proofValue;
+
+          if (Array.isArray(proofValue)) {
+            for (const item of proofValue) {
+              if (item.attribute && item.proof) {
+                // Revealed attribute with value
+                revealedAttributes[item.attribute] = item.attribute;
+              }
             }
           }
-          
-          if (item.type === 'AttributeInRange' && item.attributeTag) {
-            revealedAttributes[`${item.attributeTag}_verified`] = true;
-            revealedAttributes[`${item.attributeTag}_range`] = {
-              lower: item.lower,
-              upper: item.upper
-            };
+        }
+
+        // Extract statement verification results if available
+        if (credential.credentialSubject && credential.credentialSubject.statement) {
+          for (const item of credential.credentialSubject.statement) {
+            if (item.type === 'AttributeInRange' && item.attributeTag) {
+              revealedAttributes[`${item.attributeTag}_verified`] = true;
+            }
+            if (item.type === 'AttributeInSet' && item.attributeTag) {
+              revealedAttributes[`${item.attributeTag}_verified`] = true;
+            }
           }
-          
-          if (item.type === 'AttributeInSet' && item.attributeTag) {
-            revealedAttributes[`${item.attributeTag}_verified`] = true;
-            revealedAttributes[`${item.attributeTag}_allowedSet`] = item.set;
+        }
+      } else if (!isModernFormat) {
+        // Extract from legacy format
+        const legacyProof = proofResult as any;
+        if (Array.isArray(legacyProof.proof)) {
+          const proofData = legacyProof.proof[0];
+
+          if (proofData && proofData.statement) {
+            for (const item of proofData.statement) {
+              if (item.type === 'RevealAttribute' && item.attributeTag) {
+                if (proofData.revealedAttributes && proofData.revealedAttributes[item.attributeTag]) {
+                  revealedAttributes[item.attributeTag] = proofData.revealedAttributes[item.attributeTag];
+                }
+              }
+
+              if (item.type === 'AttributeInRange' && item.attributeTag) {
+                revealedAttributes[`${item.attributeTag}_verified`] = true;
+                revealedAttributes[`${item.attributeTag}_range`] = {
+                  lower: item.lower,
+                  upper: item.upper
+                };
+              }
+
+              if (item.type === 'AttributeInSet' && item.attributeTag) {
+                revealedAttributes[`${item.attributeTag}_verified`] = true;
+                revealedAttributes[`${item.attributeTag}_allowedSet`] = item.set;
+              }
+            }
           }
         }
       }
@@ -164,7 +254,7 @@ export async function verifyConcordiumProof(
     } catch (extractError: any) {
       console.warn('Error extracting attributes:', extractError);
     }
-    
+
     return {
       isValid: true,
       uniqueUserId,
@@ -183,14 +273,17 @@ export async function verifyConcordiumProof(
 
 /**
  * Generates a cryptographically secure challenge string
- * This should be called before requesting a proof from the frontend
+ * Concordium requires a 32-byte hex string (64 hex characters)
  * 
- * @returns A unique challenge string
+ * @returns A 64-character hex string (32 bytes)
  */
 export function generateChallenge(): string {
-  const timestamp = Date.now();
-  const random = Math.random().toString(36).substring(2, 15);
-  return `VeriLoan-${timestamp}-${random}`;
+  // Generate 32 random bytes as hex string (64 characters)
+  const randomBytes = Array.from({ length: 32 }, () =>
+    Math.floor(Math.random() * 256).toString(16).padStart(2, '0')
+  ).join('');
+
+  return randomBytes;
 }
 
 /**
@@ -203,16 +296,42 @@ export function generateChallenge(): string {
 export function isValidProofStructure(proofResultJson: string): boolean {
   try {
     const proof = JSON.parse(proofResultJson);
-    
-    return (
-      proof &&
-      typeof proof === 'object' &&
-      'proof' in proof &&
-      'credential' in proof &&
-      'presentationContext' in proof &&
-      Array.isArray(proof.proof)
+
+    // Must be an object
+    if (!proof || typeof proof !== 'object') {
+      return false;
+    }
+
+    // Must have presentationContext (the challenge)
+    const hasPresentationContext = 'presentationContext' in proof;
+
+    // Must have proof object or array
+    const hasProof = 'proof' in proof;
+
+    // Must have credentials in some form:
+    // - Modern format: verifiableCredential (array)
+    // - Legacy format: credential (single object)
+    const hasCredentials = (
+      'verifiableCredential' in proof && Array.isArray(proof.verifiableCredential) ||
+      'credential' in proof
     );
-  } catch {
+
+    // Should have type field for modern Verifiable Presentations
+    const hasType = 'type' in proof;
+
+    const isValid = hasPresentationContext && hasProof && hasCredentials;
+
+    console.log('Proof structure validation:', {
+      hasPresentationContext,
+      hasProof,
+      hasCredentials,
+      hasType,
+      isValid
+    });
+
+    return isValid;
+  } catch (error) {
+    console.error('Error validating proof structure:', error);
     return false;
   }
 }
