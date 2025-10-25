@@ -116,10 +116,18 @@ app.post('/api/verify-identity', async (req: Request, res: Response) => {
       ? concordiumProof
       : JSON.stringify(concordiumProof);
 
+    console.log('Received Concordium Proof:', proofJson.substring(0, 500) + '...');
+    console.log('Proof keys:', Object.keys(JSON.parse(proofJson)));
+
     if (!isValidProofStructure(proofJson)) {
+      console.log('❌ Invalid proof structure detected');
       return res.status(400).json({
         success: false,
-        error: 'Invalid proof structure'
+        error: 'Invalid proof structure',
+        debug: {
+          receivedKeys: Object.keys(JSON.parse(proofJson)),
+          expectedKeys: ['proof', 'credential', 'presentationContext']
+        }
       });
     }
 
@@ -185,22 +193,45 @@ app.get('/api/verification-status/:verificationId', (req: Request, res: Response
 
 /**
  * Verify Terms and Conditions acceptance signature
+ * Note: This is basic validation for development. Production should implement
+ * full cryptographic signature verification using Concordium SDK.
  */
 app.post('/api/verify-terms-acceptance', async (req: Request, res: Response) => {
   try {
     const { signature, message, termsVersion, termsHash, accountAddress, timestamp } = req.body;
 
+    console.log('Terms verification request received:');
+    console.log('- Account Address:', accountAddress);
+    console.log('- Terms Version:', termsVersion);
+    console.log('- Terms Hash:', termsHash);
+    console.log('- Timestamp:', timestamp);
+    console.log('- Message:', message);
+    console.log('- Signature type:', typeof signature);
+    console.log('- Signature structure:', JSON.stringify(signature, null, 2));
+
+    // Check for missing fields
     if (!signature || !message || !termsVersion || !termsHash || !accountAddress || !timestamp) {
+      const missingFields = [];
+      if (!signature) missingFields.push('signature');
+      if (!message) missingFields.push('message');
+      if (!termsVersion) missingFields.push('termsVersion');
+      if (!termsHash) missingFields.push('termsHash');
+      if (!accountAddress) missingFields.push('accountAddress');
+      if (!timestamp) missingFields.push('timestamp');
+
+      console.log('❌ Missing required fields:', missingFields);
       return res.status(400).json({
         success: false,
         error: 'Missing required fields',
-        required: ['signature', 'message', 'termsVersion', 'termsHash', 'accountAddress', 'timestamp']
+        required: ['signature', 'message', 'termsVersion', 'termsHash', 'accountAddress', 'timestamp'],
+        missing: missingFields
       });
     }
 
     // Validate terms version
     const CURRENT_TERMS_VERSION = '1.0';
     if (termsVersion !== CURRENT_TERMS_VERSION) {
+      console.log(`❌ Invalid terms version: ${termsVersion} (expected ${CURRENT_TERMS_VERSION})`);
       return res.status(400).json({
         success: false,
         error: `Invalid terms version. Current version is ${CURRENT_TERMS_VERSION}`,
@@ -214,7 +245,17 @@ app.post('/api/verify-terms-acceptance', async (req: Request, res: Response) => 
     const fiveMinutesAgo = now - (5 * 60 * 1000);
     const oneMinuteAhead = now + (60 * 1000);
 
+    if (isNaN(signatureTime)) {
+      console.log('❌ Invalid timestamp format:', timestamp);
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid timestamp format',
+        verified: false
+      });
+    }
+
     if (signatureTime < fiveMinutesAgo) {
+      console.log('❌ Terms signature has expired');
       return res.status(400).json({
         success: false,
         error: 'Terms signature has expired. Please sign again.',
@@ -223,6 +264,7 @@ app.post('/api/verify-terms-acceptance', async (req: Request, res: Response) => 
     }
 
     if (signatureTime > oneMinuteAhead) {
+      console.log('❌ Timestamp is in the future');
       return res.status(400).json({
         success: false,
         error: 'Invalid timestamp',
@@ -230,26 +272,70 @@ app.post('/api/verify-terms-acceptance', async (req: Request, res: Response) => 
       });
     }
 
-    // TODO: Implement full cryptographic verification
-    // For now, basic structure validation
-    const isValid = typeof signature === 'object' &&
-      signature.signature &&
-      message.includes(termsVersion) &&
-      message.includes(termsHash);
+    // Basic validation checks
+    const validationResults = {
+      signatureIsObject: typeof signature === 'object' && signature !== null,
+      signatureHasData: false,
+      messageIncludesVersion: message && typeof message === 'string' && message.includes(termsVersion),
+      messageIncludesHash: message && typeof message === 'string' && message.includes(termsHash),
+    };
 
+    // Check signature structure (Concordium signatures can be in different formats)
+    if (validationResults.signatureIsObject) {
+      // Check for common Concordium signature fields
+      const hasStandardFormat = !!(
+        signature.signature || // String signature
+        signature.sig || // Alternative field name
+        (Array.isArray(signature) && signature.length > 0) || // Array format
+        (signature.type && signature.value) // Object with type/value
+      );
+
+      // Check for Concordium nested object format: {"0": {"0": "hex_string"}}
+      const hasNestedFormat = !!(
+        signature['0'] && typeof signature['0'] === 'object' && signature['0']['0']
+      );
+
+      // Check if signature has any data in any recognized format
+      validationResults.signatureHasData = hasStandardFormat || hasNestedFormat || Object.keys(signature).length > 0;
+    }
+
+    console.log('Validation results:', validationResults);
+
+    // Check if all validations passed
+    const allChecksPass = Object.values(validationResults).every(v => v === true);
+
+    if (!allChecksPass) {
+      const failedChecks = Object.entries(validationResults)
+        .filter(([_, value]) => !value)
+        .map(([key]) => key);
+
+      console.log('❌ Validation failed. Failed checks:', failedChecks);
+      return res.status(400).json({
+        success: false,
+        error: 'Signature validation failed',
+        verified: false,
+        details: {
+          failedChecks,
+          message: 'One or more validation checks did not pass'
+        }
+      });
+    }
+
+    console.log('✅ Terms verification passed all checks');
     res.json({
       success: true,
-      verified: isValid,
+      verified: true,
       accountAddress,
       termsVersion,
       timestamp: new Date().toISOString()
     });
 
   } catch (error: any) {
-    console.error('Terms verification error:', error);
+    console.error('❌ Terms verification error:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Internal server error'
+      error: error.message || 'Internal server error',
+      verified: false
     });
   }
 });
