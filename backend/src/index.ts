@@ -183,6 +183,49 @@ app.get('/api/verification-status/:verificationId', (req: Request, res: Response
   });
 });
 
+/**
+ * Verify Concordium signed message
+ */
+app.post('/api/verify-signature', async (req: Request, res: Response) => {
+  try {
+    const { signature, message, accountAddress } = req.body;
+
+    if (!signature || !message || !accountAddress) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields',
+        required: ['signature', 'message', 'accountAddress']
+      });
+    }
+
+    // TODO: Implement cryptographic signature verification
+    // This would involve:
+    // 1. Parse the signature data
+    // 2. Verify the signature against the message and account public key
+    // 3. Check signature format and validity
+
+    // For now, return basic validation
+    const isValid = typeof signature === 'object' && 
+                   signature.signature && 
+                   signature.message === message;
+
+    res.json({
+      success: true,
+      verified: isValid,
+      accountAddress,
+      message,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error: any) {
+    console.error('Signature verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
 // Error handling middleware
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Error:', err);
@@ -209,6 +252,7 @@ const server = app.listen(PORT, () => {
   console.log('  GET  /health');
   console.log('  POST /api/challenge');
   console.log('  POST /api/verify-identity');
+  console.log('  POST /api/verify-signature');
   console.log('  GET  /api/verification-status/:id');
   console.log('');
 });

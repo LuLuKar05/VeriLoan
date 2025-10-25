@@ -6,6 +6,7 @@ import { InjectedConnector } from 'wagmi/connectors/injected';
 import { MetaMaskConnector } from 'wagmi/connectors/metaMask';
 import { useAccount, useConnect, useSignMessage } from 'wagmi';
 import { detectConcordiumProvider, WalletApi } from '@concordium/browser-wallet-api-helpers';
+import { SignMessage } from './SignMessage';
 
 // Helper: calculates date string for 18 years ago (YYYY-MM-DD)
 export function getEighteenYearsAgoDate(): string {
@@ -91,6 +92,7 @@ function VerificationDApp(): JSX.Element {
 
   const [status, setStatus] = useState<string>('Ready to verify');
   const [loading, setLoading] = useState<boolean>(false);
+  const [showSignMessage, setShowSignMessage] = useState<boolean>(false);
 
   // Detect Concordium provider on mount
   useEffect(() => {
@@ -320,6 +322,32 @@ function VerificationDApp(): JSX.Element {
         <div style={styles.section}>
           <div style={styles.label}>Status</div>
           <div style={styles.statusBox}>{status}</div>
+        </div>
+
+        <hr style={{ border: 'none', borderTop: '1px solid #e5e7eb', margin: '16px 0' }} />
+
+        <div style={styles.section}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={styles.label}>Concordium Digital Signature</div>
+            <button
+              style={{
+                ...styles.button,
+                ...styles.secondary,
+                padding: '6px 12px',
+                fontSize: 12,
+              }}
+              onClick={() => setShowSignMessage(!showSignMessage)}
+              disabled={!concordiumProvider || !concordiumAddress}
+            >
+              {showSignMessage ? 'Hide' : 'Show'} Sign Message
+            </button>
+          </div>
+          {showSignMessage && (
+            <SignMessage 
+              provider={concordiumProvider} 
+              accountAddress={concordiumAddress} 
+            />
+          )}
         </div>
 
         <div style={{ marginTop: 16, padding: 12, background: '#e0f2fe', borderRadius: 8, fontSize: 13 }}>
