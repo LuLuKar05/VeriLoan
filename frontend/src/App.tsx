@@ -4,9 +4,10 @@ import { publicProvider } from 'wagmi/providers/public';
 import { mainnet } from 'wagmi/chains';
 import { InjectedConnector } from 'wagmi/connectors/injected';
 import { MetaMaskConnector } from 'wagmi/connectors/metaMask';
-import { useAccount, useConnect, useSignMessage } from 'wagmi';
+import { useAccount, useConnect, useSignMessage, useDisconnect } from 'wagmi';
 import { detectConcordiumProvider, WalletApi } from '@concordium/browser-wallet-api-helpers';
 import { SignMessage } from './SignMessage';
+import { TermsAndConditions } from './TermsAndConditions';
 
 // Extend Window interface for ethereum
 declare global {
@@ -93,7 +94,8 @@ function VerificationDApp(): JSX.Element {
   const [concordiumConnecting, setConcordiumConnecting] = useState<boolean>(false);
 
   // EVM (wagmi)
-  const { connect: connectEvm, connectors, disconnect: disconnectEvm } = useConnect();
+  const { connect: connectEvm, connectors } = useConnect();
+  const { disconnect: disconnectEvm } = useDisconnect();
   const { address: evmAddress, isConnected: evmConnected } = useAccount();
   const { signMessageAsync } = useSignMessage();
 
@@ -101,6 +103,8 @@ function VerificationDApp(): JSX.Element {
   const [loading, setLoading] = useState<boolean>(false);
   const [showSignMessage, setShowSignMessage] = useState<boolean>(false);
   const [metaMaskDetected, setMetaMaskDetected] = useState<boolean>(false);
+  const [showTermsModal, setShowTermsModal] = useState<boolean>(false);
+  const [termsSignature, setTermsSignature] = useState<any>(null);
 
   // Detect MetaMask on mount
   useEffect(() => {
@@ -118,6 +122,7 @@ function VerificationDApp(): JSX.Element {
     const timer = setTimeout(detectMetaMask, 1000);
     return () => clearTimeout(timer);
   }, []);
+
 
   // Detect Concordium provider on mount
   useEffect(() => {
@@ -326,9 +331,60 @@ function VerificationDApp(): JSX.Element {
   };
 
   const startVerification = async () => {
-    setStatus('Preparing verification...');
+    if (!concordiumAddress || !concordiumProvider) {
+      setStatus('❌ Concordium wallet not connected');
+      return;
+    }
+    if (!evmConnected || !evmAddress) {
+      setStatus('❌ EVM wallet not connected');
+      return;
+    }
+
+    // Show Terms & Conditions modal first
+    setShowTermsModal(true);
+  };
+
+  const handleTermsAccepted = async (signature: any) => {
+    setShowTermsModal(false);
+    setTermsSignature(signature);
+    setStatus('Verifying terms acceptance...');
     setLoading(true);
 
+    try {
+      // Verify terms signature with backend
+      const termsVerifyResponse = await fetch('/api/verify-terms-acceptance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(signature),
+      });
+
+      if (!termsVerifyResponse.ok) {
+        throw new Error('Terms verification failed');
+      }
+
+      const termsResult = await termsVerifyResponse.json();
+      
+      if (!termsResult.verified) {
+        throw new Error('Terms signature verification failed');
+      }
+
+      setStatus('✅ Terms accepted. Proceeding with identity verification...');
+
+      // Now proceed with the original verification flow
+      await proceedWithIdentityVerification();
+
+    } catch (err: any) {
+      setStatus(`❌ Error: ${err?.message || String(err)}`);
+      setLoading(false);
+    }
+  };
+
+  const handleTermsCancelled = () => {
+    setShowTermsModal(false);
+    setStatus('Verification cancelled. You must accept terms to continue.');
+  };
+
+  const proceedWithIdentityVerification = async () => {
     try {
       if (!concordiumAddress || !concordiumProvider) throw new Error('Concordium wallet not connected');
       if (!evmConnected || !evmAddress) throw new Error('EVM wallet not connected');
@@ -390,6 +446,7 @@ function VerificationDApp(): JSX.Element {
         concordiumAddress,
         evmSignature,
         evmAddress,
+        termsAcceptance: termsSignature,
       };
 
       const resp = await fetch('/api/verify-identity', {
@@ -413,6 +470,15 @@ function VerificationDApp(): JSX.Element {
 
   return (
     <div style={styles.container}>
+      {showTermsModal && (
+        <TermsAndConditions
+          provider={concordiumProvider}
+          accountAddress={concordiumAddress}
+          onAccepted={handleTermsAccepted}
+          onCancel={handleTermsCancelled}
+        />
+      )}
+
       <div style={styles.card}>
         <div style={styles.header}>
           <h1 style={{ margin: '0 0 8px 0', color: '#111827' }}>VeriLoan</h1>

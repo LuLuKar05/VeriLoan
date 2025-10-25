@@ -226,6 +226,77 @@ app.post('/api/verify-signature', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Verify Terms and Conditions acceptance signature
+ */
+app.post('/api/verify-terms-acceptance', async (req: Request, res: Response) => {
+  try {
+    const { signature, message, termsVersion, termsHash, accountAddress, timestamp } = req.body;
+
+    if (!signature || !message || !termsVersion || !termsHash || !accountAddress || !timestamp) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields',
+        required: ['signature', 'message', 'termsVersion', 'termsHash', 'accountAddress', 'timestamp']
+      });
+    }
+
+    // Validate terms version
+    const CURRENT_TERMS_VERSION = '1.0';
+    if (termsVersion !== CURRENT_TERMS_VERSION) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid terms version. Current version is ${CURRENT_TERMS_VERSION}`,
+        verified: false
+      });
+    }
+
+    // Validate timestamp (not too old, not in future)
+    const signatureTime = new Date(timestamp).getTime();
+    const now = Date.now();
+    const fiveMinutesAgo = now - (5 * 60 * 1000);
+    const oneMinuteAhead = now + (60 * 1000);
+
+    if (signatureTime < fiveMinutesAgo) {
+      return res.status(400).json({
+        success: false,
+        error: 'Terms signature has expired. Please sign again.',
+        verified: false
+      });
+    }
+
+    if (signatureTime > oneMinuteAhead) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid timestamp',
+        verified: false
+      });
+    }
+
+    // TODO: Implement full cryptographic verification
+    // For now, basic structure validation
+    const isValid = typeof signature === 'object' && 
+                   signature.signature && 
+                   message.includes(termsVersion) &&
+                   message.includes(termsHash);
+
+    res.json({
+      success: true,
+      verified: isValid,
+      accountAddress,
+      termsVersion,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error: any) {
+    console.error('Terms verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
 // Error handling middleware
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Error:', err);
@@ -253,6 +324,7 @@ const server = app.listen(PORT, () => {
   console.log('  POST /api/challenge');
   console.log('  POST /api/verify-identity');
   console.log('  POST /api/verify-signature');
+  console.log('  POST /api/verify-terms-acceptance');
   console.log('  GET  /api/verification-status/:id');
   console.log('');
 });
