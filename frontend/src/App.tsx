@@ -360,7 +360,7 @@ function VerificationDApp(): JSX.Element {
   const handleTermsAccepted = async (signature: any) => {
     setShowTermsModal(false);
     setTermsSignature(signature);
-    setStatus('Verifying terms acceptance...');
+    setStatus('Verifying terms signature with backend...');
     setLoading(true);
 
     try {
@@ -371,24 +371,29 @@ function VerificationDApp(): JSX.Element {
         body: JSON.stringify(signature),
       });
 
-      if (!termsVerifyResponse.ok) {
-        throw new Error('Terms verification failed');
-      }
-
       const termsResult = await termsVerifyResponse.json();
+
+      if (!termsVerifyResponse.ok) {
+        throw new Error(termsResult.error || 'Terms verification failed');
+      }
       
-      if (!termsResult.verified) {
-        throw new Error('Terms signature verification failed');
+      if (!termsResult.success || !termsResult.verified) {
+        throw new Error(termsResult.error || 'Terms signature verification failed - signature is invalid');
       }
 
-      setStatus('✅ Terms accepted. Proceeding with identity verification...');
+      // Show success message with verification details
+      setStatus(`✅ Terms signature verified successfully!\n\nAccount: ${termsResult.accountAddress}\nTerms Version: ${termsResult.termsVersion}\n\nProceeding with identity verification...`);
+
+      // Wait a moment to show the success message
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
       // Now proceed with the original verification flow
       await proceedWithIdentityVerification();
 
     } catch (err: any) {
-      setStatus(`❌ Error: ${err?.message || String(err)}`);
+      setStatus(`❌ Terms verification failed: ${err?.message || String(err)}\n\nPlease try signing the terms again.`);
       setLoading(false);
+      setTermsSignature(null);
     }
   };
 
