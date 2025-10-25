@@ -1,0 +1,64 @@
+# yaml-language-server: $schema=./node_modules/envio/evm.schema.json
+name: DeFi-Lending-Indexer
+description: Tracks lending activities on Aave V3, Compound V3, and Spark Protocol
+
+# Global contract definitions
+contracts:
+  # Aave V3 Pool Contract
+  - name: AaveV3Pool
+    abi_file_path: ./abis/aave-v3-pool-abi.json
+    handler: ./src/EventHandlers.ts
+    events:
+      - event: Borrow
+      - event: Repay
+      - event: LiquidationCall
+      - event: Supply
+      - event: Withdraw
+
+  # Compound V3 (Comet) Contract
+  - name: CompoundV3Comet
+    abi_file_path: ./abis/compound-v3-comet-abi.json
+    handler: ./src/EventHandlers.ts
+    events:
+      - event: Supply
+      - event: Withdraw
+      - event: AbsorbCollateral
+      - event: AbsorbDebt
+      - event: BuyCollateral
+
+  # Spark Protocol Pool Contract
+  - name: SparkPool
+    abi_file_path: ./abis/spark-pool-abi.json
+    handler: ./src/EventHandlers.ts
+    events:
+      - event: Borrow
+      - event: Repay
+      - event: LiquidationCall
+      - event: Supply
+      - event: Withdraw
+
+networks:
+  - id: 1 # Ethereum Mainnet
+    start_block: 17000000 # Adjust based on when you want to start indexing
+    contracts:
+      # Aave V3 Pool on Ethereum
+      - name: AaveV3Pool
+        address: 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2
+      
+      # Compound V3 USDC Comet on Ethereum
+      - name: CompoundV3Comet
+        address: 0xc3d688B66703497DAA19211EEdff47f25384cdc3
+      
+      # Spark Protocol Pool on Ethereum
+      - name: SparkPool
+        address: 0xC13e21B648A5Ee794902342038FF3aDAB66BE987
+
+# Single chain mode for Ethereum mainnet
+unordered_multichain_mode: false
+
+# Preload optimization for better performance
+# Note: Handlers will run twice, use Effect API for external calls
+preload_handlers: false
+
+# Use lowercase addresses for better performance
+address_format: lowercase
