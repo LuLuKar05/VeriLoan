@@ -1,0 +1,64 @@
+*.exe
+*.obj
+*.out
+*.compile
+*.native
+*.byte
+*.cmo
+*.annot
+*.cmi
+*.cmx
+*.cmt
+*.cmti
+*.cma
+*.a
+*.cmxa
+*.obj
+*~
+*.annot
+*.cmj
+*.bak
+lib/*
+*.mlast
+*.mliast
+.vscode
+.merlin
+.bsb.lock
+/node_modules/
+benchmarks/
+artifacts
+cache
+build
+*.res.js
+*.res.mjs
+generated
+.env
+
+# Logs and debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# Build outputs
+dist/
+build/
+.cache/
+.parcel-cache/
+
+# Environment files
+.env.local
+.env.*.local
+
+# Persisted state
+persisted_state.envio.json
+

@@ -1,0 +1,129 @@
+# User wallet entity - tracks all lending activities
+type User {
+  id: ID! # Wallet address
+  totalBorrowsUSD: BigInt!
+  totalSuppliesUSD: BigInt!
+  totalLiquidations: Int!
+  loanPositions: [LoanPosition!]! @derivedFrom(field: "user")
+  liquidations: [LiquidationEvent!]! @derivedFrom(field: "user")
+  supplyPositions: [SupplyPosition!]! @derivedFrom(field: "user")
+}
+
+# Individual loan position per protocol and asset
+type LoanPosition {
+  id: ID! # user-protocol-asset-reserveAddress
+  user: User!
+  protocol: Protocol!
+  asset: String! # Token symbol (ETH, USDC, DAI, etc)
+  assetAddress: String! # Token contract address
+  borrowedAmount: BigInt! # Amount borrowed in token units
+  borrowedAmountUSD: BigInt! # USD value at borrow time
+  collateralAmount: BigInt! # Collateral deposited
+  collateralAmountUSD: BigInt! # USD value of collateral
+  collateralAsset: String! # Collateral token symbol
+  collateralAssetAddress: String! # Collateral token address
+  loanToValue: BigInt! # LTV ratio (scaled by 10000, e.g., 7500 = 75%)
+  liquidationThreshold: BigInt! # Liquidation threshold (scaled by 10000)
+  healthFactor: BigInt! # Health factor (scaled by 1e18)
+  isActive: Boolean!
+  createdAt: BigInt! # Block timestamp
+  updatedAt: BigInt! # Last update timestamp
+  transactionHash: String!
+}
+
+# Supply/Collateral positions
+type SupplyPosition {
+  id: ID! # user-protocol-asset-reserveAddress
+  user: User!
+  protocol: Protocol!
+  asset: String! # Token symbol
+  assetAddress: String! # Token contract address
+  suppliedAmount: BigInt! # Amount supplied
+  suppliedAmountUSD: BigInt! # USD value
+  isCollateral: Boolean! # Whether used as collateral
+  createdAt: BigInt!
+  updatedAt: BigInt!
+  transactionHash: String!
+}
+
+# Liquidation events
+type LiquidationEvent {
+  id: ID! # txHash-logIndex
+  user: User! # Borrower being liquidated
+  liquidator: String! # Address of liquidator
+  protocol: Protocol!
+  collateralAsset: String!
+  collateralAssetAddress: String!
+  debtAsset: String!
+  debtAssetAddress: String!
+  debtToCover: BigInt! # Amount of debt repaid
+  liquidatedCollateralAmount: BigInt! # Collateral seized
+  liquidatedCollateralUSD: BigInt! # USD value of seized collateral
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: String!
+}
+
+# Borrow event history
+type BorrowEvent {
+  id: ID! # txHash-logIndex
+  user: String!
+  protocol: Protocol!
+  asset: String!
+  assetAddress: String!
+  amount: BigInt!
+  amountUSD: BigInt!
+  borrowRate: BigInt!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: String!
+}
+
+# Repay event history
+type RepayEvent {
+  id: ID! # txHash-logIndex
+  user: String!
+  protocol: Protocol!
+  asset: String!
+  assetAddress: String!
+  amount: BigInt!
+  amountUSD: BigInt!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: String!
+}
+
+# Supply event history
+type SupplyEvent {
+  id: ID! # txHash-logIndex
+  user: String!
+  protocol: Protocol!
+  asset: String!
+  assetAddress: String!
+  amount: BigInt!
+  amountUSD: BigInt!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: String!
+}
+
+# Withdraw event history
+type WithdrawEvent {
+  id: ID! # txHash-logIndex
+  user: String!
+  protocol: Protocol!
+  asset: String!
+  assetAddress: String!
+  amount: BigInt!
+  amountUSD: BigInt!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: String!
+}
+
+# Protocol enum
+enum Protocol {
+  AAVE_V3
+  COMPOUND_V3
+  SPARK
+}
