@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { WagmiConfig, createConfig, configureChains } from 'wagmi';
 import { publicProvider } from 'wagmi/providers/public';
 import { mainnet } from 'wagmi/chains';
 import { InjectedConnector } from 'wagmi/connectors/injected';
 import { MetaMaskConnector } from 'wagmi/connectors/metaMask';
 import { useAccount, useConnect, useSignMessage } from 'wagmi';
+import { detectConcordiumProvider, WalletApi } from '@concordium/browser-wallet-api-helpers';
 
 // Helper: calculates date string for 18 years ago (YYYY-MM-DD)
 export function getEighteenYearsAgoDate(): string {
@@ -78,8 +79,10 @@ const styles: { [k: string]: React.CSSProperties } = {
 };
 
 function VerificationDApp(): JSX.Element {
-  // Concordium state (simplified for now)
+  // Concordium state
   const [concordiumAddress, setConcordiumAddress] = useState<string | null>(null);
+  const [concordiumProvider, setConcordiumProvider] = useState<WalletApi | null>(null);
+  const [concordiumConnecting, setConcordiumConnecting] = useState<boolean>(false);
 
   // EVM (wagmi)
   const { connect: connectEvm, connectors } = useConnect();
@@ -89,23 +92,80 @@ function VerificationDApp(): JSX.Element {
   const [status, setStatus] = useState<string>('Ready to verify');
   const [loading, setLoading] = useState<boolean>(false);
 
+  // Detect Concordium provider on mount
+  useEffect(() => {
+    const detectWallet = async () => {
+      try {
+        console.log('Attempting to detect Concordium Browser Wallet...');
+        // Give the extension time to inject itself (timeout in ms)
+        const provider = await detectConcordiumProvider(2000);
+        setConcordiumProvider(provider);
+        console.log('✅ Concordium Browser Wallet detected successfully!', provider);
+        console.log('Provider methods:', Object.keys(provider));
+        setStatus('Ready to verify. Concordium wallet detected!');
+      } catch (err) {
+        console.error('❌ Concordium Browser Wallet not detected:', err);
+        console.log('Please install the Concordium Browser Wallet extension');
+        setStatus('⚠️ Concordium Browser Wallet extension not found. Please install it from the Chrome Web Store.');
+      }
+    };
+    
+    detectWallet();
+  }, []);
+
   const onConnectConcordium = async () => {
+    setConcordiumConnecting(true);
+    setStatus('Connecting to Concordium Browser Wallet...');
+    
     try {
-      // For now, this is a placeholder
-      // You'll need to implement actual Concordium wallet connection
-      setStatus('Concordium wallet connection requires the Concordium Browser Wallet extension...');
+      if (!concordiumProvider) {
+        throw new Error('Concordium Browser Wallet not detected. Please install the extension from Chrome Web Store.');
+      }
+
+      console.log('🔐 Connecting to Concordium wallet...');
       
-      // Placeholder - in reality, you'd use @concordium/browser-wallet-api-helpers
-      // Example: const account = await detectConcordiumProvider().connect();
+      // First, try to get the most recent connected account
+      let accountAddress = await concordiumProvider.getMostRecentlySelectedAccount();
       
-      // Simulating connection for demo
-      setTimeout(() => {
-        const demoAddress = '3kBx2h5Y4jo4CWC3kPNhqr2AXVQ5ZqbPGCAqvNcyJLMaJtqJ2k';
-        setConcordiumAddress(demoAddress);
-        setStatus('Concordium wallet connected (demo mode)');
-      }, 1000);
+      console.log('Most recently selected account:', accountAddress);
+      
+      // If no account is selected, request connection (this will show popup if needed)
+      if (!accountAddress) {
+        console.log('No account selected, requesting connection...');
+        setStatus('Please approve the connection in the Concordium Browser Wallet extension...');
+        accountAddress = await concordiumProvider.connect();
+      }
+      
+      console.log('✅ Account retrieved:', accountAddress);
+      
+      if (!accountAddress || accountAddress === '') {
+        throw new Error('No account address available. Please:\n1. Open the Concordium Browser Wallet extension\n2. Make sure you have an account created\n3. Select an account in the wallet\n4. Try connecting again');
+      }
+      
+      setConcordiumAddress(accountAddress);
+      setStatus(`✅ Concordium wallet connected!\n\n📍 Your Account: ${accountAddress}\n\nThis is your real Concordium account ID from the browser wallet.\n\nNow connect your EVM wallet to proceed.`);
+      console.log('💾 Successfully connected with account:', accountAddress);
+      
     } catch (err: any) {
-      setStatus(`Error connecting Concordium wallet: ${err?.message || String(err)}`);
+      console.error('❌ Concordium connection error:', err);
+      console.error('Error details:', {
+        message: err?.message,
+        code: err?.code,
+        stack: err?.stack
+      });
+      
+      const errorMessage = err?.message || String(err);
+      
+      if (errorMessage.includes('User rejected') || errorMessage.includes('cancelled') || errorMessage.includes('denied')) {
+        setStatus('❌ Connection request denied.\n\nClick the button again and approve the request in the Concordium Browser Wallet extension.');
+      } else if (errorMessage.includes('No account')) {
+        setStatus('❌ No account found in wallet.\n\nPlease:\n1. Open the Concordium Browser Wallet extension\n2. Create or import an account\n3. Try connecting again');
+      } else {
+        setStatus(`❌ Error connecting to Concordium wallet:\n\n${errorMessage}\n\nTroubleshooting:\n1. Make sure the Concordium Browser Wallet extension is installed\n2. Open the extension and create/unlock your account\n3. Refresh this page and try again`);
+      }
+      setConcordiumAddress(null);
+    } finally {
+      setConcordiumConnecting(false);
     }
   };
 
@@ -125,30 +185,54 @@ function VerificationDApp(): JSX.Element {
     setLoading(true);
 
     try {
-      if (!concordiumAddress) throw new Error('Concordium wallet not connected.');
+      if (!concordiumAddress || !concordiumProvider) throw new Error('Concordium wallet not connected.');
       if (!evmConnected || !evmAddress) throw new Error('EVM wallet not connected.');
 
-      // 4.1 Define Statements
-      const zkpStatement = {
-        type: 'and',
-        statements: [
-          { type: 'reveal', attribute: 'firstName' },
-          { type: 'reveal', attribute: 'lastName' },
-          { type: 'predicate', attribute: 'dob', operator: '<=', value: getEighteenYearsAgoDate() },
-          { type: 'in', attribute: 'nationality', values: ['DK', 'DE', 'GB'] },
-        ],
-      };
+      // 4.1 Define Statements for ZKP (Concordium credential statements format)
+      const zkpStatement = [
+        {
+          idQualifier: {
+            type: 'cred' as const,
+            issuers: [] as number[]
+          },
+          statement: [
+            { type: 'RevealAttribute' as const, attributeTag: 'firstName' as const },
+            { type: 'RevealAttribute' as const, attributeTag: 'lastName' as const },
+            { 
+              type: 'AttributeInRange' as const, 
+              attributeTag: 'dob' as const,
+              lower: '18000101',
+              upper: getEighteenYearsAgoDate().replace(/-/g, '')
+            },
+            { 
+              type: 'AttributeInSet' as const, 
+              attributeTag: 'nationality' as const,
+              set: ['DK', 'DE', 'GB']
+            }
+          ]
+        }
+      ];
 
-      // 4.2 Request Concordium ZKP
-      setStatus('Waiting for Concordium proof...\n\nNote: Full Concordium integration requires the Browser Wallet API.\nThis is a demo showing the verification flow.');
+      // 4.2 Request Concordium ZKP (Verifiable Presentation)
+      setStatus('Waiting for Concordium proof...\n\nPlease approve the request in your Concordium Browser Wallet.');
 
-      // Placeholder for Concordium proof
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      const concordiumProof = {
-        type: 'VerifiablePresentation',
-        proof: 'demo_proof_placeholder',
-        statement: zkpStatement,
-      };
+      let concordiumProof: any = null;
+
+      try {
+        // Request verifiable presentation from the Concordium wallet
+        concordiumProof = await concordiumProvider.requestVerifiablePresentation(
+          'VeriLoan Identity Verification',
+          zkpStatement
+        );
+
+        if (!concordiumProof) {
+          throw new Error('No proof returned from Concordium wallet.');
+        }
+
+        setStatus('Concordium proof received successfully!\n\nNow requesting EVM signature...');
+      } catch (err: any) {
+        throw new Error(`Concordium proof request failed: ${err?.message || String(err)}`);
+      }
 
       // 4.3 Request EVM Signature
       setStatus('Waiting for EVM signature...');
@@ -211,13 +295,18 @@ function VerificationDApp(): JSX.Element {
                 ...(concordiumAddress ? styles.secondary : styles.primary),
               }}
               onClick={onConnectConcordium}
-              disabled={!!concordiumAddress || loading}
+              disabled={!!concordiumAddress || loading || concordiumConnecting || !concordiumProvider}
             >
-              {concordiumAddress ? '✓ Concordium Connected' : 'Connect Concordium Wallet'}
+              {concordiumConnecting ? '⏳ Opening Wallet...' : concordiumAddress ? '✅ Concordium Connected' : '🔐 Connect Concordium Wallet'}
             </button>
           </div>
           {concordiumAddress && (
-            <div style={styles.addressText}>Address: {concordiumAddress}</div>
+            <div style={styles.addressText}>Account: {concordiumAddress}</div>
+          )}
+          {!concordiumProvider && (
+            <div style={{ ...styles.addressText, color: '#dc2626', marginTop: 4 }}>
+              ⚠️ Concordium Browser Wallet not detected
+            </div>
           )}
         </div>
 
@@ -261,9 +350,23 @@ function VerificationDApp(): JSX.Element {
           <div style={styles.statusBox}>{status}</div>
         </div>
 
-        <div style={{ marginTop: 16, padding: 12, background: '#fef3c7', borderRadius: 8, fontSize: 13 }}>
-          <strong>ℹ️ Note:</strong> Full Concordium ZKP integration requires the Concordium Browser Wallet extension
-          and proper API setup. This demo shows the UI flow and EVM wallet integration.
+        <div style={{ marginTop: 16, padding: 12, background: '#e0f2fe', borderRadius: 8, fontSize: 13 }}>
+          <strong>ℹ️ Integration Status:</strong> This app is now connected to the Concordium Browser Wallet!
+          {!concordiumProvider && (
+            <>
+              <br /><br />
+              <strong>⚠️ Wallet Not Detected:</strong> Please install the{' '}
+              <a 
+                href="https://chrome.google.com/webstore/detail/concordium-wallet/mnnkpffndmickbiakofclnpoiajlegmg" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                style={{ color: '#2563eb', textDecoration: 'underline' }}
+              >
+                Concordium Browser Wallet extension
+              </a>
+              {' '}to use this feature.
+            </>
+          )}
         </div>
       </div>
     </div>
