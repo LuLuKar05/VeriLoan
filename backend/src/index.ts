@@ -61,7 +61,7 @@ app.post('/api/challenge', (_req: Request, res: Response) => {
   try {
     const sessionId = uuidv4();
     const challenge = generateChallenge();
-    
+
     activeChallenges.set(sessionId, {
       challenge,
       createdAt: Date.now()
@@ -87,12 +87,12 @@ app.post('/api/challenge', (_req: Request, res: Response) => {
  */
 app.post('/api/verify-identity', async (req: Request, res: Response) => {
   try {
-    const { 
-      concordiumProof, 
-      concordiumAddress, 
-      evmSignature, 
+    const {
+      concordiumProof,
+      concordiumAddress,
+      evmSignature,
       evmAddress,
-      sessionId 
+      sessionId
     } = req.body;
 
     if (!concordiumProof || !concordiumAddress || !evmSignature || !evmAddress) {
@@ -112,8 +112,8 @@ app.post('/api/verify-identity', async (req: Request, res: Response) => {
       }
     }
 
-    const proofJson = typeof concordiumProof === 'string' 
-      ? concordiumProof 
+    const proofJson = typeof concordiumProof === 'string'
+      ? concordiumProof
       : JSON.stringify(concordiumProof);
 
     if (!isValidProofStructure(proofJson)) {
@@ -174,56 +174,13 @@ app.post('/api/verify-identity', async (req: Request, res: Response) => {
  */
 app.get('/api/verification-status/:verificationId', (req: Request, res: Response) => {
   const { verificationId } = req.params;
-  
+
   res.json({
     success: true,
     verificationId,
     status: 'completed',
     timestamp: new Date().toISOString()
   });
-});
-
-/**
- * Verify Concordium signed message
- */
-app.post('/api/verify-signature', async (req: Request, res: Response) => {
-  try {
-    const { signature, message, accountAddress } = req.body;
-
-    if (!signature || !message || !accountAddress) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required fields',
-        required: ['signature', 'message', 'accountAddress']
-      });
-    }
-
-    // TODO: Implement cryptographic signature verification
-    // This would involve:
-    // 1. Parse the signature data
-    // 2. Verify the signature against the message and account public key
-    // 3. Check signature format and validity
-
-    // For now, return basic validation
-    const isValid = typeof signature === 'object' && 
-                   signature.signature && 
-                   signature.message === message;
-
-    res.json({
-      success: true,
-      verified: isValid,
-      accountAddress,
-      message,
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error: any) {
-    console.error('Signature verification error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Internal server error'
-    });
-  }
 });
 
 /**
@@ -275,10 +232,10 @@ app.post('/api/verify-terms-acceptance', async (req: Request, res: Response) => 
 
     // TODO: Implement full cryptographic verification
     // For now, basic structure validation
-    const isValid = typeof signature === 'object' && 
-                   signature.signature && 
-                   message.includes(termsVersion) &&
-                   message.includes(termsHash);
+    const isValid = typeof signature === 'object' &&
+      signature.signature &&
+      message.includes(termsVersion) &&
+      message.includes(termsHash);
 
     res.json({
       success: true,
