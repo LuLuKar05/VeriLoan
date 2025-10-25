@@ -219,17 +219,34 @@ function VerificationDApp(): JSX.Element {
 
   const onConnectConcordium = async () => {
     setConcordiumConnecting(true);
-    setStatus('Connecting to Concordium Browser Wallet...');
+    setStatus('Opening Concordium Browser Wallet...');
     
     try {
       if (!concordiumProvider) {
         throw new Error('Concordium Browser Wallet not detected');
       }
 
-      let accountAddress = await concordiumProvider.getMostRecentlySelectedAccount();
+      // Clear any existing connection state
+      setConcordiumAddress(null);
+
+      setStatus('Please approve the connection and select an account in the Concordium Browser Wallet...');
       
-      if (!accountAddress) {
-        setStatus('Please approve the connection in the Concordium Browser Wallet...');
+      // Try to request accounts - this should trigger the wallet UI
+      // The connect() method should show account picker, but wallet behavior varies
+      // If the wallet has a requestAccounts or similar method, it should prompt
+      let accountAddress: string | undefined;
+      
+      try {
+        // Some wallets support requestAccounts which forces account selection
+        if (typeof (concordiumProvider as any).requestAccounts === 'function') {
+          const accounts = await (concordiumProvider as any).requestAccounts();
+          accountAddress = accounts?.[0] || await concordiumProvider.connect();
+        } else {
+          // Standard connect method
+          accountAddress = await concordiumProvider.connect();
+        }
+      } catch (connectErr) {
+        // If that fails, try standard connect
         accountAddress = await concordiumProvider.connect();
       }
       
@@ -507,7 +524,12 @@ function VerificationDApp(): JSX.Element {
             </button>
           </div>
           {concordiumAddress && (
-            <div style={styles.addressText}>Account: {concordiumAddress}</div>
+            <>
+              <div style={styles.addressText}>Account: {concordiumAddress}</div>
+              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 8, padding: 8, background: '#f3f4f6', borderRadius: 6 }}>
+                <strong>💡 To change accounts:</strong> Open the Concordium Browser Wallet extension → Select a different account → Then click the connect button above again
+              </div>
+            </>
           )}
           {!concordiumProvider && (
             <div style={{ ...styles.addressText, color: '#dc2626', marginTop: 4 }}>
