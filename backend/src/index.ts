@@ -9,12 +9,26 @@ import dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
 import { verifyMessage } from 'ethers';
 import { verifyConcordiumProof, generateChallenge, isValidProofStructure } from './verifier.js';
+import * as db from './database.js';
+import envioRoutes from './routes/envio-routes.js';
 
 // Load environment variables
 dotenv.config();
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '8000', 10);
+
+// Initialize MongoDB connection
+async function initializeServer() {
+  try {
+    console.log('🔄 Initializing MongoDB connection...');
+    await db.initDatabase();
+    console.log('✅ Database initialized successfully');
+  } catch (error) {
+    console.error('❌ Failed to initialize database:', error);
+    console.log('⚠️  Server will continue without database. Please check MongoDB connection.');
+  }
+}
 
 // Middleware
 app.use(cors({
@@ -55,6 +69,11 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 /**
+ * Mount Envio API routes
+ */
+app.use('/api/envio', envioRoutes);
+
+/**
  * Generate a new challenge for ZKP request
  * This should be called before requesting a proof from the frontend
  */
@@ -93,7 +112,9 @@ app.post('/api/verify-identity', async (req: Request, res: Response) => {
       concordiumAddress,
       evmSignature,
       evmAddress,
-      sessionId
+      sessionId,
+      concordiumTermsAcceptance,
+      evmTermsAcceptance
     } = req.body;
 
     if (!concordiumProof || !concordiumAddress || !evmSignature || !evmAddress) {
@@ -104,6 +125,7 @@ app.post('/api/verify-identity', async (req: Request, res: Response) => {
       });
     }
 
+    // Get challenge from session
     let challenge = 'VeriLoan Identity Verification';
     if (sessionId && activeChallenges.has(sessionId)) {
       const challengeData = activeChallenges.get(sessionId);
@@ -132,6 +154,7 @@ app.post('/api/verify-identity', async (req: Request, res: Response) => {
       });
     }
 
+    // Verify Concordium proof
     const verificationResult = await verifyConcordiumProof({
       proofResultJson: proofJson,
       challenge
@@ -144,12 +167,38 @@ app.post('/api/verify-identity', async (req: Request, res: Response) => {
       });
     }
 
+    // Create or update wallet pairing in database
+    const pairing = await db.createOrUpdatePairing(
+      concordiumAddress,
+      evmAddress,
+      {
+        firstName: verificationResult.revealedAttributes?.firstName,
+        lastName: verificationResult.revealedAttributes?.lastName,
+        nationality: verificationResult.revealedAttributes?.nationality,
+        ageVerified: true, // Verified via date of birth proof
+      }
+    );
+
+    // Mark terms acceptance in database
+    if (concordiumTermsAcceptance) {
+      await db.markConcordiumTermsAccepted(concordiumAddress);
+    }
+    if (evmTermsAcceptance) {
+      await db.markEvmTermsAccepted(concordiumAddress, evmAddress);
+    }
+
+    console.log('✅ Wallet pairing created/updated:', {
+      pairingId: pairing.pairingId,
+      concordiumAddress: pairing.concordiumAddress,
+      evmAddresses: pairing.evmAddresses,
+      totalPairings: pairing.evmAddresses.length
+    });
+
     const response = {
       success: true,
       verification: {
         concordium: {
           verified: true,
-          uniqueUserId: verificationResult.uniqueUserId,
           address: concordiumAddress,
           revealedAttributes: verificationResult.revealedAttributes
         },
@@ -157,11 +206,21 @@ app.post('/api/verify-identity', async (req: Request, res: Response) => {
           verified: true,
           address: evmAddress,
           signature: evmSignature
+        },
+        pairing: {
+          pairingId: pairing.pairingId,
+          totalEvmAddresses: pairing.evmAddresses.length,
+          evmAddresses: pairing.evmAddresses,
+          termsAccepted: {
+            concordium: pairing.termsAcceptance.concordium,
+            evmCount: pairing.termsAcceptance.evm.length
+          }
         }
       },
       attestation: {
-        status: 'pending',
-        message: 'Attestation creation would happen here in production'
+        status: 'completed',
+        pairingHash: pairing.pairingId,
+        message: 'Wallet pairing stored securely with cryptographic hash'
       },
       timestamp: new Date().toISOString()
     };
@@ -430,6 +489,69 @@ app.post('/api/verify-evm-terms-acceptance', async (req: Request, res: Response)
   }
 });
 
+/**
+ * Get wallet pairing information
+ */
+app.get('/api/pairing/:address', async (req: Request, res: Response) => {
+  try {
+    const { address } = req.params;
+
+    // Try to find pairing by Concordium address
+    let pairing = await db.getPairingByConcordium(address);
+
+    // If not found, try by EVM address
+    if (!pairing) {
+      pairing = await db.getPairingByEvm(address);
+    }
+
+    if (!pairing) {
+      return res.status(404).json({
+        success: false,
+        error: 'No pairing found for this address'
+      });
+    }
+
+    res.json({
+      success: true,
+      pairing: {
+        pairingId: pairing.pairingId,
+        concordiumAddress: pairing.concordiumAddress,
+        evmAddresses: pairing.evmAddresses,
+        verifiedAttributes: pairing.verifiedAttributes,
+        termsAcceptance: pairing.termsAcceptance,
+        createdAt: pairing.createdAt,
+        updatedAt: pairing.updatedAt
+      }
+    });
+
+  } catch (error: any) {
+    console.error('Pairing lookup error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
+/**
+ * Get database statistics
+ */
+app.get('/api/stats', async (_req: Request, res: Response) => {
+  try {
+    const stats = await db.getStats();
+    res.json({
+      success: true,
+      stats
+    });
+  } catch (error: any) {
+    console.error('Stats error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
 // Error handling middleware
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Error:', err);
@@ -448,27 +570,67 @@ app.use((_req: Request, res: Response) => {
 });
 
 // Start server
-const server = app.listen(PORT, () => {
-  console.log('VeriLoan Backend Server');
-  console.log(`Listening on http://localhost:${PORT}`);
-  console.log('');
-  console.log('Endpoints:');
-  console.log('  GET  /health');
-  console.log('  POST /api/challenge');
-  console.log('  POST /api/verify-identity');
-  console.log('  POST /api/verify-signature');
-  console.log('  POST /api/verify-terms-acceptance');
-  console.log('  POST /api/verify-evm-terms-acceptance');
-  console.log('  GET  /api/verification-status/:id');
-  console.log('');
-});
+async function startServer() {
+  // Initialize database first
+  await initializeServer();
 
-server.on('error', (err: any) => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(`Port ${PORT} is already in use`);
-  } else {
-    console.error('Server error:', err);
-  }
+  const server = app.listen(PORT, () => {
+    console.log('VeriLoan Backend Server');
+    console.log(`Listening on http://localhost:${PORT}`);
+    console.log('');
+    console.log('Endpoints:');
+    console.log('  GET  /health');
+    console.log('  POST /api/challenge');
+    console.log('  POST /api/verify-identity');
+    console.log('  POST /api/verify-signature');
+    console.log('  POST /api/verify-terms-acceptance');
+    console.log('  POST /api/verify-evm-terms-acceptance');
+    console.log('  GET  /api/pairing/:address');
+    console.log('  GET  /api/stats');
+    console.log('  GET  /api/verification-status/:id');
+    console.log('');
+    console.log('Envio Integration Endpoints:');
+    console.log('  GET  /api/envio/health');
+    console.log('  GET  /api/envio/loans/:evmAddress');
+    console.log('  GET  /api/envio/repayments/:evmAddress');
+    console.log('  GET  /api/envio/liquidations/:evmAddress');
+    console.log('  GET  /api/envio/summary/:evmAddress');
+    console.log('  GET  /api/envio/paired-wallet/:concordiumAddress');
+    console.log('');
+  });
+
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`Port ${PORT} is already in use`);
+    } else {
+      console.error('Server error:', err);
+    }
+    process.exit(1);
+  });
+
+  // Handle shutdown gracefully
+  process.on('SIGINT', async () => {
+    console.log('\n🛑 Shutting down server...');
+    await db.closeDatabase();
+    server.close(() => {
+      console.log('Server closed');
+      process.exit(0);
+    });
+  });
+
+  process.on('SIGTERM', async () => {
+    console.log('\n🛑 Shutting down server...');
+    await db.closeDatabase();
+    server.close(() => {
+      console.log('Server closed');
+      process.exit(0);
+    });
+  });
+}
+
+// Start the server
+startServer().catch((err) => {
+  console.error('Failed to start server:', err);
   process.exit(1);
 });
 
