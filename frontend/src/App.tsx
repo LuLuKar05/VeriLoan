@@ -8,6 +8,13 @@ import { useAccount, useConnect, useSignMessage } from 'wagmi';
 import { detectConcordiumProvider, WalletApi } from '@concordium/browser-wallet-api-helpers';
 import { SignMessage } from './SignMessage';
 
+// Extend Window interface for ethereum
+declare global {
+  interface Window {
+    ethereum?: any;
+  }
+}
+
 // Helper: calculates date string for 18 years ago (YYYY-MM-DD)
 export function getEighteenYearsAgoDate(): string {
   const now = new Date();
@@ -86,13 +93,31 @@ function VerificationDApp(): JSX.Element {
   const [concordiumConnecting, setConcordiumConnecting] = useState<boolean>(false);
 
   // EVM (wagmi)
-  const { connect: connectEvm, connectors } = useConnect();
+  const { connect: connectEvm, connectors, disconnect: disconnectEvm } = useConnect();
   const { address: evmAddress, isConnected: evmConnected } = useAccount();
   const { signMessageAsync } = useSignMessage();
 
   const [status, setStatus] = useState<string>('Ready to verify');
   const [loading, setLoading] = useState<boolean>(false);
   const [showSignMessage, setShowSignMessage] = useState<boolean>(false);
+  const [metaMaskDetected, setMetaMaskDetected] = useState<boolean>(false);
+
+  // Detect MetaMask on mount
+  useEffect(() => {
+    const detectMetaMask = () => {
+      if (typeof window !== 'undefined' && window.ethereum && window.ethereum.isMetaMask) {
+        setMetaMaskDetected(true);
+      } else {
+        setMetaMaskDetected(false);
+      }
+    };
+    
+    detectMetaMask();
+    
+    // Recheck after a short delay in case MetaMask loads asynchronously
+    const timer = setTimeout(detectMetaMask, 1000);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Detect Concordium provider on mount
   useEffect(() => {
@@ -100,7 +125,7 @@ function VerificationDApp(): JSX.Element {
       try {
         const provider = await detectConcordiumProvider(2000);
         setConcordiumProvider(provider);
-        setStatus('Ready to verify. Concordium wallet detected!');
+        setStatus('Ready to verify. Wallets can be connected!');
       } catch (err) {
         setStatus('⚠️ Concordium Browser Wallet not found. Please install the extension.');
       }
@@ -108,6 +133,84 @@ function VerificationDApp(): JSX.Element {
     
     detectWallet();
   }, []);
+
+  // Clear any cached EVM connections on mount to ensure fresh connection flow
+  useEffect(() => {
+    const clearCachedConnection = async () => {
+      // If wagmi thinks we're connected on mount, disconnect to force manual connection
+      if (evmConnected) {
+        await disconnectEvm();
+        console.log('Cleared cached EVM connection on mount');
+      }
+    };
+    
+    clearCachedConnection();
+  }, []); // Run only once on mount
+
+  // Monitor EVM wallet connection state and disconnect if wallet is disconnected
+  useEffect(() => {
+    if (!metaMaskDetected) return;
+
+    const checkEvmConnection = async () => {
+      try {
+        if (window.ethereum) {
+          const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+          
+          // If we think we're connected but no accounts available, disconnect
+          if (evmConnected && (!accounts || accounts.length === 0)) {
+            disconnectEvm();
+            setStatus('⚠️ EVM wallet: Disconnected');
+          }
+          
+          // If wagmi shows connected but MetaMask has no accounts, force disconnect
+          if (evmConnected && evmAddress && (!accounts || accounts.length === 0)) {
+            disconnectEvm();
+            setStatus('⚠️ EVM wallet: Disconnected - please reconnect');
+          }
+        }
+      } catch (err) {
+        console.error('Error checking EVM connection:', err);
+      }
+    };
+
+    checkEvmConnection();
+
+    // Listen for account changes
+    const handleAccountsChanged = (accounts: string[]) => {
+      if (accounts.length === 0 && evmConnected) {
+        disconnectEvm();
+        setStatus('⚠️ EVM wallet: Disconnected');
+      }
+    };
+
+    // Listen for chain changes (might indicate disconnection)
+    const handleChainChanged = () => {
+      // Reload is recommended by MetaMask on chain change
+      window.location.reload();
+    };
+
+    // Listen for disconnect event
+    const handleDisconnect = () => {
+      if (evmConnected) {
+        disconnectEvm();
+        setStatus('⚠️ EVM wallet: Disconnected');
+      }
+    };
+
+    if (window.ethereum) {
+      window.ethereum.on('accountsChanged', handleAccountsChanged);
+      window.ethereum.on('chainChanged', handleChainChanged);
+      window.ethereum.on('disconnect', handleDisconnect);
+    }
+
+    return () => {
+      if (window.ethereum && window.ethereum.removeListener) {
+        window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+        window.ethereum.removeListener('chainChanged', handleChainChanged);
+        window.ethereum.removeListener('disconnect', handleDisconnect);
+      }
+    };
+  }, [evmConnected, evmAddress, metaMaskDetected, disconnectEvm]);
 
   const onConnectConcordium = async () => {
     setConcordiumConnecting(true);
@@ -136,11 +239,11 @@ function VerificationDApp(): JSX.Element {
       const errorMessage = err?.message || String(err);
       
       if (errorMessage.includes('User rejected') || errorMessage.includes('cancelled')) {
-        setStatus('❌ Connection request denied');
+        setStatus('❌ Concordium wallet: Request denied by user');
       } else if (errorMessage.includes('No account')) {
-        setStatus('❌ No account found. Please create an account in the Concordium Browser Wallet');
+        setStatus('❌ Concordium wallet: No account found. Please create an account in the Concordium Browser Wallet');
       } else {
-        setStatus(`❌ Error: ${errorMessage}`);
+        setStatus(`❌ Concordium wallet: ${errorMessage}`);
       }
       setConcordiumAddress(null);
     } finally {
@@ -150,12 +253,75 @@ function VerificationDApp(): JSX.Element {
 
   const onConnectEvm = async () => {
     try {
-      const connector = connectors?.[0];
-      if (!connector) throw new Error('No EVM connectors available');
-      await connectEvm({ connector });
-      setStatus('EVM wallet connected successfully!');
+      if (!metaMaskDetected) {
+        throw new Error('MetaMask not detected. Please install MetaMask browser extension.');
+      }
+
+      if (!window.ethereum) {
+        throw new Error('MetaMask not available');
+      }
+
+      // First, completely disconnect any existing wagmi connection
+      if (evmConnected) {
+        await disconnectEvm();
+        // Wait a bit for the disconnect to complete
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+
+      setStatus('Opening MetaMask popup...');
+
+      // Request wallet_requestPermissions to FORCE the MetaMask popup to appear
+      // This ensures the user has to manually approve the connection
+      try {
+        await window.ethereum.request({
+          method: 'wallet_requestPermissions',
+          params: [{ eth_accounts: {} }],
+        });
+      } catch (permError: any) {
+        // If user rejects the permission request
+        if (permError?.code === 4001 || permError?.message?.includes('User rejected')) {
+          throw new Error('User rejected connection request');
+        }
+        // If wallet_requestPermissions is not supported, fall back to eth_requestAccounts
+        console.log('wallet_requestPermissions not supported, using eth_requestAccounts');
+      }
+
+      setStatus('Requesting accounts from MetaMask...');
+
+      // Now request accounts - this should show the popup if not already shown
+      const accounts = await window.ethereum.request({ 
+        method: 'eth_requestAccounts' 
+      });
+      
+      if (!accounts || accounts.length === 0) {
+        throw new Error('No accounts returned from MetaMask');
+      }
+
+      setStatus('Connecting wallet...');
+
+      // Find MetaMask connector specifically
+      const metaMaskConnector = connectors.find(
+        (connector) => connector.id === 'metaMask' || connector.name === 'MetaMask'
+      );
+      
+      if (!metaMaskConnector) {
+        throw new Error('MetaMask connector not found');
+      }
+      
+      // Now connect using wagmi with the approved accounts
+      await connectEvm({ connector: metaMaskConnector });
+      
+      setStatus(`✅ MetaMask connected!\nAddress: ${accounts[0]}`);
     } catch (err: any) {
-      setStatus(`Error connecting EVM wallet: ${err?.message || String(err)}`);
+      console.error('MetaMask connection error:', err);
+      
+      if (err?.code === 4001 || err?.message?.includes('User rejected') || err?.message?.includes('User denied')) {
+        setStatus('❌ EVM wallet: Request denied by user');
+      } else if (err?.message?.includes('MetaMask') && err?.message?.includes('not')) {
+        setStatus('❌ EVM wallet: MetaMask not detected. Please install the MetaMask browser extension');
+      } else {
+        setStatus(`❌ EVM wallet: ${err?.message || String(err)}`);
+      }
     }
   };
 
@@ -293,13 +459,18 @@ function VerificationDApp(): JSX.Element {
                 ...(evmConnected ? styles.secondary : styles.primary),
               }}
               onClick={onConnectEvm}
-              disabled={evmConnected || loading}
+              disabled={evmConnected || loading || !metaMaskDetected}
             >
-              {evmConnected ? '✓ EVM Connected' : 'Connect EVM Wallet'}
+              {evmConnected ? '✅ MetaMask Connected' : '🦊 Connect MetaMask'}
             </button>
           </div>
           {evmConnected && evmAddress && (
             <div style={styles.addressText}>Address: {evmAddress}</div>
+          )}
+          {!metaMaskDetected && (
+            <div style={{ ...styles.addressText, color: '#dc2626', marginTop: 4 }}>
+              ⚠️ MetaMask extension not detected
+            </div>
           )}
         </div>
 
@@ -351,19 +522,44 @@ function VerificationDApp(): JSX.Element {
         </div>
 
         <div style={{ marginTop: 16, padding: 12, background: '#e0f2fe', borderRadius: 8, fontSize: 13 }}>
-          <strong>ℹ️ Integration Status:</strong> Connected to Concordium Browser Wallet
-          {!concordiumProvider && (
+          <strong>ℹ️ Wallet Detection Status:</strong>
+          <br />
+          • Concordium: {concordiumProvider ? '✅ Detected' : '❌ Not Detected'}
+          <br />
+          • MetaMask: {metaMaskDetected ? '✅ Detected' : '❌ Not Detected'}
+          
+          {(!concordiumProvider || !metaMaskDetected) && (
             <>
               <br /><br />
-              <strong>⚠️ Wallet Not Detected:</strong> Please install the{' '}
-              <a 
-                href="https://chrome.google.com/webstore/detail/concordium-wallet/mnnkpffndmickbiakofclnpoiajlegmg" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                style={{ color: '#2563eb', textDecoration: 'underline' }}
-              >
-                Concordium Browser Wallet
-              </a>
+              <strong>⚠️ Missing Wallets:</strong>
+              {!concordiumProvider && (
+                <>
+                  <br />
+                  → Install{' '}
+                  <a 
+                    href="https://chrome.google.com/webstore/detail/concordium-wallet/mnnkpffndmickbiakofclnpoiajlegmg" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    style={{ color: '#2563eb', textDecoration: 'underline' }}
+                  >
+                    Concordium Browser Wallet
+                  </a>
+                </>
+              )}
+              {!metaMaskDetected && (
+                <>
+                  <br />
+                  → Install{' '}
+                  <a 
+                    href="https://metamask.io/download/" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    style={{ color: '#2563eb', textDecoration: 'underline' }}
+                  >
+                    MetaMask Extension
+                  </a>
+                </>
+              )}
             </>
           )}
         </div>
