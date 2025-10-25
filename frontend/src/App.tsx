@@ -105,6 +105,16 @@ function VerificationDApp(): JSX.Element {
   const [showTermsModal, setShowTermsModal] = useState<boolean>(false);
   const [concordiumTermsSignature, setConcordiumTermsSignature] = useState<any>(null);
   const [evmTermsSignature, setEvmTermsSignature] = useState<any>(null);
+  const [verificationComplete, setVerificationComplete] = useState<boolean>(false);
+  const [proofReport, setProofReport] = useState<any>(null);
+  const [showReportUI, setShowReportUI] = useState<boolean>(false);
+  
+  // Loan report form fields
+  const [loanAmount, setLoanAmount] = useState<string>('');
+  const [repayAmount, setRepayAmount] = useState<string>('');
+  const [loanToValue, setLoanToValue] = useState<string>('');
+  const [liquidationAmount, setLiquidationAmount] = useState<string>('');
+  const [country, setCountry] = useState<string>('');
 
   // Detect MetaMask on mount
   useEffect(() => {
@@ -461,7 +471,10 @@ function VerificationDApp(): JSX.Element {
       });
 
       if (resp.ok) {
-        setStatus('✅ Verification successful!\n\n' + JSON.stringify(payload, null, 2));
+        const responseData = await resp.json();
+        setProofReport(responseData);
+        setVerificationComplete(true);
+        setStatus('✅ Verification successful!\n\n' + JSON.stringify(responseData, null, 2));
       } else {
         const text = await resp.text().catch(() => 'Unknown error');
         throw new Error(`Service error: ${resp.status} ${text}`);
@@ -471,6 +484,58 @@ function VerificationDApp(): JSX.Element {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleCloseVerification = () => {
+    setVerificationComplete(false);
+    setProofReport(null);
+    setShowReportUI(false);
+    // Reset form fields
+    setLoanAmount('');
+    setRepayAmount('');
+    setLoanToValue('');
+    setLiquidationAmount('');
+    setCountry('');
+    setStatus('Ready to verify again');
+  };
+
+  const handleCreateReport = () => {
+    setShowReportUI(true);
+    // Pre-fill country from verification data if available
+    if (proofReport?.concordiumProof?.response?.value?.revealedAttributes) {
+      const nationality = proofReport.concordiumProof.response.value.revealedAttributes.find(
+        (attr: any) => attr.attributeTag === 'nationality'
+      );
+      if (nationality?.attributeValue) {
+        setCountry(nationality.attributeValue);
+      }
+    }
+    setStatus('📄 Report UI opened. Fill in loan details.');
+  };
+
+  const handleCloseReport = () => {
+    setShowReportUI(false);
+    setStatus('Report UI closed.');
+  };
+
+  const handleGenerateReport = () => {
+    // Validate required fields
+    if (!loanAmount || !repayAmount || !loanToValue || !liquidationAmount || !country) {
+      setStatus('❌ Please fill in all loan details before generating report.');
+      return;
+    }
+
+    const reportData = {
+      loanAmount,
+      repayAmount,
+      loanToValue,
+      liquidationAmount,
+      country,
+      verificationStatus: 'Verified',
+      timestamp: new Date().toISOString(),
+    };
+
+    setStatus('✅ Report generated successfully!\n\n' + JSON.stringify(reportData, null, 2));
   };
 
   return (
@@ -554,17 +619,192 @@ function VerificationDApp(): JSX.Element {
         <div style={styles.section}>
           <div style={styles.label}>3. Start Verification</div>
           <div style={styles.row}>
+            {!verificationComplete ? (
+              <button
+                style={{
+                  ...styles.button,
+                  ...((concordiumAddress && evmConnected && !loading) ? styles.primary : styles.disabled),
+                }}
+                onClick={startVerification}
+                disabled={!(concordiumAddress && evmConnected) || loading}
+              >
+                {loading ? '⏳ Processing...' : 'Start Verification'}
+              </button>
+            ) : (
+              <button
+                style={{
+                  ...styles.button,
+                  background: '#10b981',
+                  color: '#fff',
+                }}
+                onClick={handleCloseVerification}
+              >
+                ✅ Verified - Close
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div style={styles.section}>
+          <div style={styles.label}>4. Create Report</div>
+          <div style={styles.row}>
             <button
               style={{
                 ...styles.button,
-                ...((concordiumAddress && evmConnected && !loading) ? styles.primary : styles.disabled),
+                ...(verificationComplete && !showReportUI ? { background: '#8b5cf6', color: '#fff' } : styles.disabled),
               }}
-              onClick={startVerification}
-              disabled={!(concordiumAddress && evmConnected) || loading}
+              onClick={handleCreateReport}
+              disabled={!verificationComplete || showReportUI}
             >
-              {loading ? '⏳ Processing...' : 'Start Verification'}
+              {showReportUI ? '📄 Report UI Open' : verificationComplete ? '📝 Create Report' : '🔒 Create Report (Verify First)'}
             </button>
+            {showReportUI && (
+              <button
+                style={{
+                  ...styles.button,
+                  background: '#ef4444',
+                  color: '#fff',
+                }}
+                onClick={handleCloseReport}
+              >
+                ❌ Close Report
+              </button>
+            )}
           </div>
+          {showReportUI && (
+            <div style={{
+              marginTop: 16,
+              padding: 20,
+              background: '#f9fafb',
+              borderRadius: 8,
+              border: '2px solid #8b5cf6',
+            }}>
+              <h3 style={{ margin: '0 0 16px 0', color: '#8b5cf6', fontSize: 18 }}>📄 Loan Report Details</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                
+                {/* Loan Amount */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>
+                    Loan Amount (USD)
+                  </label>
+                  <input
+                    type="number"
+                    value={loanAmount}
+                    onChange={(e) => setLoanAmount(e.target.value)}
+                    placeholder="e.g., 50000"
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: 6,
+                      border: '1px solid #d1d5db',
+                      fontSize: 14,
+                      fontFamily: 'inherit',
+                    }}
+                  />
+                </div>
+
+                {/* Repay Amount */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>
+                    Repay Amount (USD)
+                  </label>
+                  <input
+                    type="number"
+                    value={repayAmount}
+                    onChange={(e) => setRepayAmount(e.target.value)}
+                    placeholder="e.g., 55000"
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: 6,
+                      border: '1px solid #d1d5db',
+                      fontSize: 14,
+                      fontFamily: 'inherit',
+                    }}
+                  />
+                </div>
+
+                {/* Loan to Value */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>
+                    Loan to Value Ratio (%)
+                  </label>
+                  <input
+                    type="number"
+                    value={loanToValue}
+                    onChange={(e) => setLoanToValue(e.target.value)}
+                    placeholder="e.g., 75"
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: 6,
+                      border: '1px solid #d1d5db',
+                      fontSize: 14,
+                      fontFamily: 'inherit',
+                    }}
+                  />
+                </div>
+
+                {/* Liquidation Amount */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>
+                    Liquidation Amount (USD)
+                  </label>
+                  <input
+                    type="number"
+                    value={liquidationAmount}
+                    onChange={(e) => setLiquidationAmount(e.target.value)}
+                    placeholder="e.g., 40000"
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: 6,
+                      border: '1px solid #d1d5db',
+                      fontSize: 14,
+                      fontFamily: 'inherit',
+                    }}
+                  />
+                </div>
+
+                {/* Country */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>
+                    Country
+                  </label>
+                  <input
+                    type="text"
+                    value={country}
+                    onChange={(e) => setCountry(e.target.value)}
+                    placeholder="e.g., United States"
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: 6,
+                      border: '1px solid #d1d5db',
+                      fontSize: 14,
+                      fontFamily: 'inherit',
+                    }}
+                  />
+                </div>
+
+                {/* Generate Report Button */}
+                <button
+                  style={{
+                    ...styles.button,
+                    background: '#10b981',
+                    color: '#fff',
+                    marginTop: 8,
+                  }}
+                  onClick={handleGenerateReport}
+                >
+                  📋 Generate Loan Report
+                </button>
+
+                <div style={{ padding: 12, background: '#dbeafe', borderRadius: 6, border: '1px solid #3b82f6' }}>
+                  <strong>ℹ️ Information:</strong>
+                  <p style={{ margin: '8px 0 0 0', fontSize: 12, color: '#1e40af' }}>
+                    This report will contain loan details without exposing sensitive verification data. 
+                    Country is auto-filled from your verified identity.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <div style={styles.section}>
