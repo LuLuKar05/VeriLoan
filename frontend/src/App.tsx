@@ -96,17 +96,11 @@ function VerificationDApp(): JSX.Element {
   useEffect(() => {
     const detectWallet = async () => {
       try {
-        console.log('Attempting to detect Concordium Browser Wallet...');
-        // Give the extension time to inject itself (timeout in ms)
         const provider = await detectConcordiumProvider(2000);
         setConcordiumProvider(provider);
-        console.log('✅ Concordium Browser Wallet detected successfully!', provider);
-        console.log('Provider methods:', Object.keys(provider));
         setStatus('Ready to verify. Concordium wallet detected!');
       } catch (err) {
-        console.error('❌ Concordium Browser Wallet not detected:', err);
-        console.log('Please install the Concordium Browser Wallet extension');
-        setStatus('⚠️ Concordium Browser Wallet extension not found. Please install it from the Chrome Web Store.');
+        setStatus('⚠️ Concordium Browser Wallet not found. Please install the extension.');
       }
     };
     
@@ -119,49 +113,32 @@ function VerificationDApp(): JSX.Element {
     
     try {
       if (!concordiumProvider) {
-        throw new Error('Concordium Browser Wallet not detected. Please install the extension from Chrome Web Store.');
+        throw new Error('Concordium Browser Wallet not detected');
       }
 
-      console.log('🔐 Connecting to Concordium wallet...');
-      
-      // First, try to get the most recent connected account
       let accountAddress = await concordiumProvider.getMostRecentlySelectedAccount();
       
-      console.log('Most recently selected account:', accountAddress);
-      
-      // If no account is selected, request connection (this will show popup if needed)
       if (!accountAddress) {
-        console.log('No account selected, requesting connection...');
-        setStatus('Please approve the connection in the Concordium Browser Wallet extension...');
+        setStatus('Please approve the connection in the Concordium Browser Wallet...');
         accountAddress = await concordiumProvider.connect();
       }
       
-      console.log('✅ Account retrieved:', accountAddress);
-      
       if (!accountAddress || accountAddress === '') {
-        throw new Error('No account address available. Please:\n1. Open the Concordium Browser Wallet extension\n2. Make sure you have an account created\n3. Select an account in the wallet\n4. Try connecting again');
+        throw new Error('No account address available');
       }
       
       setConcordiumAddress(accountAddress);
-      setStatus(`✅ Concordium wallet connected!\n\n📍 Your Account: ${accountAddress}\n\nThis is your real Concordium account ID from the browser wallet.\n\nNow connect your EVM wallet to proceed.`);
-      console.log('💾 Successfully connected with account:', accountAddress);
+      setStatus(`✅ Concordium wallet connected!\nAccount: ${accountAddress}`);
       
     } catch (err: any) {
-      console.error('❌ Concordium connection error:', err);
-      console.error('Error details:', {
-        message: err?.message,
-        code: err?.code,
-        stack: err?.stack
-      });
-      
       const errorMessage = err?.message || String(err);
       
-      if (errorMessage.includes('User rejected') || errorMessage.includes('cancelled') || errorMessage.includes('denied')) {
-        setStatus('❌ Connection request denied.\n\nClick the button again and approve the request in the Concordium Browser Wallet extension.');
+      if (errorMessage.includes('User rejected') || errorMessage.includes('cancelled')) {
+        setStatus('❌ Connection request denied');
       } else if (errorMessage.includes('No account')) {
-        setStatus('❌ No account found in wallet.\n\nPlease:\n1. Open the Concordium Browser Wallet extension\n2. Create or import an account\n3. Try connecting again');
+        setStatus('❌ No account found. Please create an account in the Concordium Browser Wallet');
       } else {
-        setStatus(`❌ Error connecting to Concordium wallet:\n\n${errorMessage}\n\nTroubleshooting:\n1. Make sure the Concordium Browser Wallet extension is installed\n2. Open the extension and create/unlock your account\n3. Refresh this page and try again`);
+        setStatus(`❌ Error: ${errorMessage}`);
       }
       setConcordiumAddress(null);
     } finally {
@@ -185,10 +162,9 @@ function VerificationDApp(): JSX.Element {
     setLoading(true);
 
     try {
-      if (!concordiumAddress || !concordiumProvider) throw new Error('Concordium wallet not connected.');
-      if (!evmConnected || !evmAddress) throw new Error('EVM wallet not connected.');
+      if (!concordiumAddress || !concordiumProvider) throw new Error('Concordium wallet not connected');
+      if (!evmConnected || !evmAddress) throw new Error('EVM wallet not connected');
 
-      // 4.1 Define Statements for ZKP (Concordium credential statements format)
       const zkpStatement = [
         {
           idQualifier: {
@@ -213,37 +189,33 @@ function VerificationDApp(): JSX.Element {
         }
       ];
 
-      // 4.2 Request Concordium ZKP (Verifiable Presentation)
-      setStatus('Waiting for Concordium proof...\n\nPlease approve the request in your Concordium Browser Wallet.');
+      setStatus('Waiting for Concordium proof...');
 
       let concordiumProof: any = null;
 
       try {
-        // Request verifiable presentation from the Concordium wallet
         concordiumProof = await concordiumProvider.requestVerifiablePresentation(
           'VeriLoan Identity Verification',
           zkpStatement
         );
 
         if (!concordiumProof) {
-          throw new Error('No proof returned from Concordium wallet.');
+          throw new Error('No proof returned from wallet');
         }
 
-        setStatus('Concordium proof received successfully!\n\nNow requesting EVM signature...');
+        setStatus('Proof received. Requesting EVM signature...');
       } catch (err: any) {
-        throw new Error(`Concordium proof request failed: ${err?.message || String(err)}`);
+        throw new Error(`Concordium proof failed: ${err?.message || String(err)}`);
       }
 
-      // 4.3 Request EVM Signature
       setStatus('Waiting for EVM signature...');
 
       const message = `I am proving ownership of this address for Concordium ID verification: ${evmAddress}`;
       const evmSignature = await signMessageAsync({ message }).catch((e: any) => {
-        throw new Error(`EVM signature rejected or failed: ${e?.message || String(e)}`);
+        throw new Error(`EVM signature failed: ${e?.message || String(e)}`);
       });
 
-      // 4.4 Send to Backend
-      setStatus('Sending to attestation service...');
+      setStatus('Sending to verification service...');
 
       const payload = {
         concordiumProof,
@@ -259,13 +231,13 @@ function VerificationDApp(): JSX.Element {
       });
 
       if (resp.ok) {
-        setStatus('Success! Your verification is being processed.\n\nPayload sent:\n' + JSON.stringify(payload, null, 2));
+        setStatus('✅ Verification successful!\n\n' + JSON.stringify(payload, null, 2));
       } else {
         const text = await resp.text().catch(() => 'Unknown error');
-        throw new Error(`Attestation service error: ${resp.status} ${text}`);
+        throw new Error(`Service error: ${resp.status} ${text}`);
       }
     } catch (err: any) {
-      setStatus(`Error: ${err?.message || String(err)}`);
+      setStatus(`❌ Error: ${err?.message || String(err)}`);
     } finally {
       setLoading(false);
     }
@@ -351,7 +323,7 @@ function VerificationDApp(): JSX.Element {
         </div>
 
         <div style={{ marginTop: 16, padding: 12, background: '#e0f2fe', borderRadius: 8, fontSize: 13 }}>
-          <strong>ℹ️ Integration Status:</strong> This app is now connected to the Concordium Browser Wallet!
+          <strong>ℹ️ Integration Status:</strong> Connected to Concordium Browser Wallet
           {!concordiumProvider && (
             <>
               <br /><br />
@@ -362,9 +334,8 @@ function VerificationDApp(): JSX.Element {
                 rel="noopener noreferrer"
                 style={{ color: '#2563eb', textDecoration: 'underline' }}
               >
-                Concordium Browser Wallet extension
+                Concordium Browser Wallet
               </a>
-              {' '}to use this feature.
             </>
           )}
         </div>
