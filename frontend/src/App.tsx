@@ -6,7 +6,6 @@ import { InjectedConnector } from 'wagmi/connectors/injected';
 import { MetaMaskConnector } from 'wagmi/connectors/metaMask';
 import { useAccount, useConnect, useSignMessage, useDisconnect } from 'wagmi';
 import { detectConcordiumProvider, WalletApi } from '@concordium/browser-wallet-api-helpers';
-import { SignMessage } from './SignMessage';
 import { TermsAndConditions } from './TermsAndConditions';
 
 // Extend Window interface for ethereum
@@ -98,10 +97,10 @@ function VerificationDApp(): JSX.Element {
   const { disconnect: disconnectEvm } = useDisconnect();
   const { address: evmAddress, isConnected: evmConnected } = useAccount();
   const { signMessageAsync } = useSignMessage();
+  const [evmConnecting, setEvmConnecting] = useState<boolean>(false);
 
   const [status, setStatus] = useState<string>('Ready to verify');
   const [loading, setLoading] = useState<boolean>(false);
-  const [showSignMessage, setShowSignMessage] = useState<boolean>(false);
   const [metaMaskDetected, setMetaMaskDetected] = useState<boolean>(false);
   const [showTermsModal, setShowTermsModal] = useState<boolean>(false);
   const [termsSignature, setTermsSignature] = useState<any>(null);
@@ -218,6 +217,12 @@ function VerificationDApp(): JSX.Element {
   }, [evmConnected, evmAddress, metaMaskDetected, disconnectEvm]);
 
   const onConnectConcordium = async () => {
+    // Prevent multiple concurrent connection attempts
+    if (concordiumConnecting) {
+      console.log('Connection already in progress, ignoring duplicate request');
+      return;
+    }
+
     setConcordiumConnecting(true);
     setStatus('Opening Concordium Browser Wallet...');
     
@@ -226,29 +231,10 @@ function VerificationDApp(): JSX.Element {
         throw new Error('Concordium Browser Wallet not detected');
       }
 
-      // Clear any existing connection state
-      setConcordiumAddress(null);
-
       setStatus('Please approve the connection and select an account in the Concordium Browser Wallet...');
       
-      // Try to request accounts - this should trigger the wallet UI
-      // The connect() method should show account picker, but wallet behavior varies
-      // If the wallet has a requestAccounts or similar method, it should prompt
-      let accountAddress: string | undefined;
-      
-      try {
-        // Some wallets support requestAccounts which forces account selection
-        if (typeof (concordiumProvider as any).requestAccounts === 'function') {
-          const accounts = await (concordiumProvider as any).requestAccounts();
-          accountAddress = accounts?.[0] || await concordiumProvider.connect();
-        } else {
-          // Standard connect method
-          accountAddress = await concordiumProvider.connect();
-        }
-      } catch (connectErr) {
-        // If that fails, try standard connect
-        accountAddress = await concordiumProvider.connect();
-      }
+      // Use only the standard connect() method to avoid duplicate wallet spawns
+      const accountAddress = await concordiumProvider.connect();
       
       if (!accountAddress || accountAddress === '') {
         throw new Error('No account address available');
@@ -274,6 +260,14 @@ function VerificationDApp(): JSX.Element {
   };
 
   const onConnectEvm = async () => {
+    // Prevent multiple concurrent connection attempts
+    if (evmConnecting) {
+      console.log('EVM connection already in progress, ignoring duplicate request');
+      return;
+    }
+
+    setEvmConnecting(true);
+    
     try {
       if (!metaMaskDetected) {
         throw new Error('MetaMask not detected. Please install MetaMask browser extension.');
@@ -344,6 +338,8 @@ function VerificationDApp(): JSX.Element {
       } else {
         setStatus(`❌ EVM wallet: ${err?.message || String(err)}`);
       }
+    } finally {
+      setEvmConnecting(false);
     }
   };
 
@@ -547,9 +543,9 @@ function VerificationDApp(): JSX.Element {
                 ...(evmConnected ? styles.secondary : styles.primary),
               }}
               onClick={onConnectEvm}
-              disabled={evmConnected || loading || !metaMaskDetected}
+              disabled={evmConnected || loading || evmConnecting || !metaMaskDetected}
             >
-              {evmConnected ? '✅ MetaMask Connected' : '🦊 Connect MetaMask'}
+              {evmConnecting ? '⏳ Opening Wallet...' : evmConnected ? '✅ MetaMask Connected' : '🦊 Connect MetaMask'}
             </button>
           </div>
           {evmConnected && evmAddress && (
@@ -581,32 +577,6 @@ function VerificationDApp(): JSX.Element {
         <div style={styles.section}>
           <div style={styles.label}>Status</div>
           <div style={styles.statusBox}>{status}</div>
-        </div>
-
-        <hr style={{ border: 'none', borderTop: '1px solid #e5e7eb', margin: '16px 0' }} />
-
-        <div style={styles.section}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={styles.label}>Concordium Digital Signature</div>
-            <button
-              style={{
-                ...styles.button,
-                ...styles.secondary,
-                padding: '6px 12px',
-                fontSize: 12,
-              }}
-              onClick={() => setShowSignMessage(!showSignMessage)}
-              disabled={!concordiumProvider || !concordiumAddress}
-            >
-              {showSignMessage ? 'Hide' : 'Show'} Sign Message
-            </button>
-          </div>
-          {showSignMessage && (
-            <SignMessage 
-              provider={concordiumProvider} 
-              accountAddress={concordiumAddress} 
-            />
-          )}
         </div>
 
         <div style={{ marginTop: 16, padding: 12, background: '#e0f2fe', borderRadius: 8, fontSize: 13 }}>
