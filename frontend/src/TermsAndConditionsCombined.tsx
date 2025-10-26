@@ -4,8 +4,8 @@ import { WalletApi } from '@concordium/browser-wallet-api-helpers';
 
 interface TermsAndConditionsCombinedProps {
   concordiumProvider: WalletApi | null;
-  concordiumAddress: string | null;
-  evmAddress: string | undefined;
+  concordiumAddress: string | null; // TODO: Future - Replace with unique identifier from Concordium ZKP (user's unique ID instead of wallet address)
+  evmAddress: string | undefined; // TODO: Future - Replace with unique identifier linked to verified Concordium identity
   onBothAccepted: (concordiumSig: any, evmSig: any) => void;
   onCancel: () => void;
 }
@@ -280,6 +280,12 @@ export function TermsAndConditionsCombined({
       const termsHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
       const timestamp = new Date().toISOString();
+      
+      // TODO: Future Implementation - Use unique identifier instead of wallet address
+      // Currently using concordiumAddress for identification
+      // Future: Use verified unique user ID from Concordium ZKP attestation
+      // This will provide better privacy and allow users to change wallet addresses
+      // without losing their identity verification status
       const message = `I accept the VeriLoan Terms and Conditions
 
 Version: ${TERMS_VERSION}
@@ -297,11 +303,21 @@ By signing this message, I confirm that I have read, understood, and agree to be
         message,
         termsVersion: TERMS_VERSION,
         termsHash,
-        accountAddress: concordiumAddress,
+        accountAddress: concordiumAddress, // TODO: Future - Replace with uniqueUserId from ZKP verification
         timestamp,
         walletType: 'Concordium'
       };
 
+      // TODO: Future Implementation - Smart Contract Verification
+      // Current: Mock verification via backend API endpoint
+      // Future: Implement on-chain verification using smart contracts
+      //   1. Deploy verification smart contract on Concordium
+      //   2. Store signature hash and public key on-chain
+      //   3. Verify signature against stored public key from blockchain
+      //   4. Emit verification event for transparency and auditability
+      //   5. Query blockchain for verification status instead of centralized backend
+      // Benefits: Trustless verification, immutable audit trail, decentralized
+      
       // Verify with backend
       setConcordiumStatus('verifying');
       const response = await fetch('/api/verify-terms-acceptance', {
@@ -346,6 +362,11 @@ By signing this message, I confirm that I have read, understood, and agree to be
       const termsHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
       const timestamp = new Date().toISOString();
+      
+      // TODO: Future Implementation - Use unique identifier instead of EVM address
+      // Currently using evmAddress for identification
+      // Future: Link this signature to the unique user ID from Concordium verification
+      // This allows for better privacy and multi-wallet support per user identity
       const message = `I accept the VeriLoan Terms and Conditions
 
 Version: ${TERMS_VERSION}
@@ -363,11 +384,22 @@ By signing this message, I confirm that I have read, understood, and agree to be
         message,
         termsVersion: TERMS_VERSION,
         termsHash,
-        address: evmAddress,
+        address: evmAddress, // TODO: Future - Replace with uniqueUserId linked to Concordium identity
         timestamp,
         walletType: 'EVM'
       };
 
+      // TODO: Future Implementation - Smart Contract Verification on EVM
+      // Current: Mock verification via backend API endpoint
+      // Future: Implement on-chain verification using EVM smart contracts
+      //   1. Deploy verification smart contract on Ethereum/EVM chains
+      //   2. Store signature hash and recovered public key/address on-chain
+      //   3. Use ecrecover or similar to verify signature against stored data
+      //   4. Emit TermsAccepted event with user address and timestamp
+      //   5. Query smart contract state for verification status
+      //   6. Cross-reference with Concordium verification for multi-chain attestation
+      // Benefits: Decentralized verification, on-chain proof, cross-chain interoperability
+      
       // Verify with backend
       setEvmStatus('verifying');
       const response = await fetch('/api/verify-evm-terms-acceptance', {
