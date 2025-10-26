@@ -72,8 +72,6 @@ export const ReportComponent: React.FC<ReportComponentProps> = ({
     setReportData(null);
 
     try {
-      console.log('🔄 Generating report for:', concordiumAddress);
-
       const response = await fetch(
         `${backendUrl}/api/report/${concordiumAddress}`,
         {
@@ -90,11 +88,9 @@ export const ReportComponent: React.FC<ReportComponentProps> = ({
       }
 
       const data: ReportData = await response.json();
-      console.log('✅ Report generated successfully:', data);
       setReportData(data);
       setShowModal(true); // Open modal when report is ready
     } catch (err: any) {
-      console.error('❌ Report generation failed:', err);
       setError(err.message || 'An error occurred');
     } finally {
       setLoading(false);

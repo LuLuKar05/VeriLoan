@@ -94,17 +94,8 @@ export const ReportComponent: React.FC<ReportComponentProps> = ({
     setReportData(null);
 
     try {
-      console.log('');
-      console.log('═══════════════════════════════════════════════════════════');
-      console.log('📊 GENERATING REPORT (Frontend)');
-      console.log('═══════════════════════════════════════════════════════════');
-      console.log('Concordium Address:', concordiumAddress);
-      console.log('EVM Address:', evmAddress);
-      console.log('Timestamp:', new Date().toISOString());
 
       // Query loans
-      console.log('');
-      console.log('🔍 Querying Hasura for LOANS...');
       const loansQuery = `
         query GetUserLoans($user: String!) {
           loans(
@@ -126,19 +117,14 @@ export const ReportComponent: React.FC<ReportComponentProps> = ({
       try {
         const loansData = await queryHasura(loansQuery, { user: evmAddress.toLowerCase() });
         loans = loansData.loans || [];
-        console.log(`✅ Found ${loans.length} loan records`);
         if (loans.length > 0) {
           loans.forEach((loan, idx) => {
-            console.log(`   ${idx + 1}. Protocol: ${loan.protocol}, Asset: ${loan.asset}, Amount: $${loan.amountUSD}, Active: ${loan.isActive}`);
           });
         }
       } catch (err: any) {
-        console.warn('⚠️  No loans found:', err.message);
       }
 
       // Query repayments
-      console.log('');
-      console.log('🔍 Querying Hasura for REPAYMENTS...');
       const repaymentsQuery = `
         query GetUserRepayments($user: String!) {
           repayments(
@@ -159,19 +145,14 @@ export const ReportComponent: React.FC<ReportComponentProps> = ({
       try {
         const repaymentsData = await queryHasura(repaymentsQuery, { user: evmAddress.toLowerCase() });
         repayments = repaymentsData.repayments || [];
-        console.log(`✅ Found ${repayments.length} repayment records`);
         if (repayments.length > 0) {
           repayments.forEach((rep, idx) => {
-            console.log(`   ${idx + 1}. Protocol: ${rep.protocol}, Asset: ${rep.asset}, Amount: $${rep.amountUSD}`);
           });
         }
       } catch (err: any) {
-        console.warn('⚠️  No repayments found:', err.message);
       }
 
       // Query liquidations
-      console.log('');
-      console.log('🔍 Querying Hasura for LIQUIDATIONS...');
       const liquidationsQuery = `
         query GetUserLiquidations($user: String!) {
           liquidations(
@@ -192,14 +173,11 @@ export const ReportComponent: React.FC<ReportComponentProps> = ({
       try {
         const liquidationsData = await queryHasura(liquidationsQuery, { user: evmAddress.toLowerCase() });
         liquidations = liquidationsData.liquidations || [];
-        console.log(`✅ Found ${liquidations.length} liquidation records`);
         if (liquidations.length > 0) {
           liquidations.forEach((liq, idx) => {
-            console.log(`   ${idx + 1}. Protocol: ${liq.protocol}, Collateral: ${liq.collateralAsset}, Debt: ${liq.debtAsset}, Liquidated: $${liq.liquidatedCollateralUSD}`);
           });
         }
       } catch (err: any) {
-        console.warn('⚠️  No liquidations found:', err.message);
       }
 
       // Calculate metrics
@@ -210,8 +188,6 @@ export const ReportComponent: React.FC<ReportComponentProps> = ({
       const activeLoans = loans.filter(l => l.isActive).length;
       const healthFactor = currentDebtUSD > BigInt(0) ? 'At Risk' : 'Healthy';
 
-      console.log('');
-      console.log('📊 CALCULATED METRICS:');
       console.log('   - Total Loans:', loans.length);
       console.log('   - Active Loans:', activeLoans);
       console.log('   - Total Borrowed (USD):', totalBorrowedUSD.toString());
@@ -219,9 +195,6 @@ export const ReportComponent: React.FC<ReportComponentProps> = ({
       console.log('   - Total Liquidated (USD):', totalLiquidatedUSD.toString());
       console.log('   - Current Debt (USD):', currentDebtUSD.toString());
       console.log('   - Health Factor:', healthFactor);
-      console.log('');
-      console.log('✅ REPORT GENERATION COMPLETED');
-      console.log('═══════════════════════════════════════════════════════════');
 
       // Build report data
       const report: ReportData = {

@@ -151,7 +151,7 @@ function VerificationDApp(): JSX.Element {
         const provider = await detectConcordiumProvider(2000);
         setConcordiumProvider(provider);
       } catch (err) {
-        console.log('Concordium Browser Wallet not found');
+        // Concordium Browser Wallet not found
       }
     };
     
@@ -164,7 +164,6 @@ function VerificationDApp(): JSX.Element {
       // If wagmi thinks we're connected on mount, disconnect to force manual connection
       if (evmConnected) {
         await disconnectEvm();
-        console.log('Cleared cached EVM connection on mount');
       }
     };
     
@@ -235,7 +234,6 @@ function VerificationDApp(): JSX.Element {
   const onConnectConcordium = async () => {
     // Prevent multiple concurrent connection attempts
     if (concordiumConnecting) {
-      console.log('Connection already in progress, ignoring duplicate request');
       return;
     }
 
@@ -267,7 +265,6 @@ function VerificationDApp(): JSX.Element {
   const onConnectEvm = async () => {
     // Prevent multiple concurrent connection attempts
     if (evmConnecting) {
-      console.log('EVM connection already in progress, ignoring duplicate request');
       return;
     }
 
@@ -302,7 +299,6 @@ function VerificationDApp(): JSX.Element {
           throw new Error('User rejected connection request');
         }
         // If wallet_requestPermissions is not supported, fall back to eth_requestAccounts
-        console.log('wallet_requestPermissions not supported, using eth_requestAccounts');
       }
 
       // Now request accounts - this should show the popup if not already shown

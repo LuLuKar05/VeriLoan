@@ -13,7 +13,9 @@
     "mongodb:start": "docker start veriloan-mongodb || docker run -d --name veriloan-mongodb -p 27017:27017 -v mongodb_veriloan_data:/data/db mongo:latest",
     "mongodb:stop": "docker stop veriloan-mongodb",
     "mongodb:logs": "docker logs -f veriloan-mongodb",
-    "mongodb:shell": "docker exec -it veriloan-mongodb mongosh"
+    "mongodb:shell": "docker exec -it veriloan-mongodb mongosh",
+    "inspect-db": "tsx inspect-db.ts",
+    "clear-db": "tsx clear-db.ts"
   },
   "keywords": [
     "concordium",

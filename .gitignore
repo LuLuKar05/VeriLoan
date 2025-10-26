@@ -1,14 +1,14 @@
 # Dependencies
-node_modules
-**/node_modules
+node_modules/
+**/node_modules/
 
 # Build output
-dist
-dist-ssr
-build
-.next
-out
-**/dist
+dist/
+dist-ssr/
+build/
+.next/
+out/
+**/dist/
 
 # Environment variables
 .env
@@ -16,9 +16,10 @@ out
 .env.*.local
 **/.env
 **/.env.local
+.env.production
 
 # Logs
-logs
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -29,7 +30,7 @@ lerna-debug.log*
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 *.suo
 *.ntvs*
 *.njsproj
@@ -48,9 +49,18 @@ desktop.ini
 *.tsbuildinfo
 
 # Testing
-coverage
-.nyc_output
+coverage/
+.nyc_output/
 
 # Temp files
 *.tmp
 *.temp
+
+# MongoDB
+data/
+mongodb-data/
+
+# Package lock files (optional - uncomment if you want to ignore)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
