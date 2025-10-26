@@ -73,7 +73,7 @@ VeriLoan/
 │   │   ├── index.ts                          # API server
 │   │   ├── verifier.ts                       # ZKP verification logic
 │   │   ├── database.ts                       # MongoDB connection
-│   │   ├── hasura-client.ts                  # Hasura GraphQL client
+│   │   ├── envio-client.ts                   # Envio GraphQL client
 │   │   └── routes/
 │   ├── package.json
 │   └── tsconfig.json
@@ -101,9 +101,21 @@ Before you begin, ensure you have the following installed:
 - **[Concordium Browser Wallet](https://chrome.google.com/webstore/detail/concordium-wallet/mnnkpffndmickbiakofclnpoiajlegmg)** - For Concordium testnet
 - **[MetaMask](https://metamask.io/)** - For EVM wallet integration
 
-### Optional
+### Blockchain Data Indexing
 
-- **Docker** (for containerized MongoDB)
+VeriLoan uses **Envio HyperIndex** for hyperindexing DeFi lending data across multiple protocols:
+
+- **[Envio Indexer](https://envio.dev/)** - Real-time blockchain event indexing
+- Indexes events from Aave V3, Compound V3, and Spark Protocol
+- Self-hosted blockchain data indexer with GraphQL API
+- Setup guide available in `envio-server/` directory
+- Configuration files included in the project
+
+> **Important**: Envio is required for the application to function properly. The hyperindexing capability is essential for aggregating DeFi lending data across multiple protocols.
+
+### Optional Tools
+
+- **Docker** - For containerized MongoDB and Envio services
 - **Git** - For cloning the repository
 
 ---
@@ -174,9 +186,8 @@ MONGODB_URI=mongodb://localhost:27017/veriloan
 PORT=8000
 NODE_ENV=development
 
-# Hasura Configuration (Optional - for DeFi data)
-HASURA_ENDPOINT=https://your-hasura-endpoint.hasura.app/v1/graphql
-HASURA_ADMIN_SECRET=your-admin-secret
+# Envio Configuration
+ENVIO_GRAPHQL_ENDPOINT=http://localhost:8080/v1/graphql
 
 # CORS Configuration
 FRONTEND_URL=http://localhost:3000
@@ -191,6 +202,89 @@ The frontend is configured through `vite.config.ts`. Default settings work out o
 
 - API endpoint (defaults to `http://localhost:8000`)
 - Port (defaults to `3000`)
+
+### Envio Indexer Setup
+
+VeriLoan uses Envio for hyperindexing DeFi lending data. Follow these steps to set it up:
+
+#### Prerequisites for Envio
+
+- **Node.js** v22 or newer (recommended)
+- **pnpm** v8 or newer - [Install pnpm](https://pnpm.io/installation)
+- **Docker Desktop** - [Download Docker](https://www.docker.com/products/docker-desktop/)
+- **WSL** (Windows users only) - [Install WSL](https://learn.microsoft.com/en-us/windows/wsl/install)
+
+#### Setup Steps
+
+1. **Navigate to the envio-server directory:**
+
+```bash
+cd envio-server
+```
+
+2. **Install dependencies:**
+
+```bash
+pnpm install
+```
+
+3. **Configure environment (optional):**
+
+```bash
+# Windows PowerShell
+Copy-Item .env.example .env
+
+# Linux/Mac
+cp .env.example .env
+```
+
+4. **Ensure Docker is running** on your machine
+
+5. **Start the Envio indexer:**
+
+```bash
+pnpm dev
+```
+
+This will:
+- Start the Envio HyperIndex indexer
+- Launch a local GraphQL API instance on http://localhost:8080
+- Begin indexing DeFi lending events from Aave V3, Compound V3, and Spark Protocol
+- Default GraphQL console password: `testing`
+
+6. **Stop the indexer when done:**
+
+```bash
+pnpm envio stop
+```
+
+#### What Envio Indexes
+
+✅ **Aave V3** - Full lending protocol  
+✅ **Compound V3** - USDC market  
+✅ **Spark Protocol** - MakerDAO's lending protocol  
+
+**Indexed Events:**
+- Borrow events
+- Repay events
+- Supply/deposit events
+- Withdrawal events
+- Liquidation events
+- User aggregates (total borrows, supplies, liquidation count)
+
+#### Configuration Files
+
+- `config.yaml` - Protocol configuration and blockchain endpoints
+- `schema.graphql` - GraphQL schema for indexed data
+- `src/EventHandlers.ts` - Event processing logic
+- `abis/` - Smart contract ABIs
+
+For more details, see:
+- `envio-server/QUICK_START.md` - Quick reference guide
+- `envio-server/SETUP_GUIDE.md` - Detailed documentation
+- [Envio Official Docs](https://docs.envio.dev/docs/HyperIndex/overview)
+
+> **Note**: Initial sync may take time as it indexes from block 17,000,000 (May 2023). You can adjust the `start_block` in `config.yaml` to sync faster.
 
 ---
 
@@ -333,7 +427,7 @@ npm run mongodb:shell    # Access MongoDB shell
    - User can generate comprehensive lending report
    - Backend fetches:
      - User identity from MongoDB
-     - DeFi lending data from Hasura GraphQL
+     - DeFi lending data from Envio GraphQL API
    - Aggregates loan history, repayments, liquidations
    - Returns formatted report with metrics
 
@@ -521,8 +615,8 @@ VeriLoan implements multiple security layers to protect user data and prevent at
 
 ### Data Sources
 
-- **Hasura GraphQL** - Indexed DeFi lending events
-- **Envio** - Blockchain data indexer (optional)
+- **Envio HyperIndex** - Real-time blockchain event indexing
+- **Envio GraphQL API** - Indexed DeFi lending data from Aave V3, Compound V3, and Spark Protocol
 
 ---
 
@@ -747,8 +841,8 @@ SOFTWARE.
 
 ### Related Projects
 
-- [Hasura GraphQL Engine](https://hasura.io/)
-- [Envio Indexer](https://envio.dev/)
+- [Envio HyperIndex](https://envio.dev/)
+- [Envio Documentation](https://docs.envio.dev/)
 
 ---
 
