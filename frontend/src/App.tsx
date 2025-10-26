@@ -42,49 +42,68 @@ const styles: { [k: string]: React.CSSProperties } = {
     justifyContent: 'flex-start',
     minHeight: '100vh',
     padding: '40px 16px',
-    fontFamily: 'Inter, Arial, sans-serif',
-    background: '#f7f8fb',
-    color: '#111827',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+    background: '#1a1c1b',
+    color: '#ffffff',
   },
   card: {
     width: '100%',
-    maxWidth: 720,
-    background: '#fff',
+    maxWidth: 480,
+    background: '#2a2c2b',
     borderRadius: 12,
-    padding: 24,
-    boxShadow: '0 6px 18px rgba(15, 23, 42, 0.08)',
+    padding: 32,
+    boxShadow: '0 6px 18px rgba(89, 255, 0, 0.15)',
+    border: '1px solid rgba(89, 255, 0, 0.2)',
     display: 'flex',
     flexDirection: 'column',
-    gap: 16,
+    gap: 20,
   },
   header: { textAlign: 'center' },
-  section: { display: 'flex', flexDirection: 'column', gap: 8 },
-  label: { fontSize: 13, color: '#6b7280', fontWeight: 600 },
+  section: { display: 'flex', flexDirection: 'column', gap: 12 },
+  label: { 
+    fontSize: 14, 
+    color: '#e5e7eb', 
+    fontWeight: 600,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   button: {
-    padding: '10px 14px',
+    padding: '12px 24px',
     borderRadius: 8,
     border: 'none',
     cursor: 'pointer',
     fontWeight: 600,
+    fontSize: 15,
     transition: 'all 0.2s',
-  },
-  primary: { background: '#2563eb', color: '#fff' },
-  secondary: { background: '#e5e7eb', color: '#111827' },
-  disabled: { background: '#d1d5db', color: '#6b7280', cursor: 'not-allowed' },
-  statusBox: {
     width: '100%',
-    minHeight: 80,
-    padding: 12,
-    borderRadius: 8,
-    border: '1px solid #e6e9ef',
-    background: '#fbfdff',
-    fontFamily: 'monospace',
-    fontSize: 13,
-    whiteSpace: 'pre-wrap',
-    overflowWrap: 'anywhere',
+    maxWidth: 320,
+    margin: '0 auto',
   },
-  row: { display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' },
-  addressText: { fontFamily: 'monospace', fontSize: 12, color: '#6b7280' },
+  primary: { 
+    background: '#59ff00', 
+    color: '#1a1c1b',
+    boxShadow: '0 0 20px rgba(89, 255, 0, 0.3)',
+  },
+  secondary: { 
+    background: '#555D58', 
+    color: '#e5e7eb',
+    border: '1px solid rgba(89, 255, 0, 0.3)',
+  },
+  disabled: { 
+    background: '#555D58', 
+    color: '#9ca3af', 
+    cursor: 'not-allowed',
+    opacity: 0.6,
+  },
+  row: { display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' },
+  addressText: { fontFamily: 'monospace', fontSize: 13, color: '#9ca3af', textAlign: 'center', marginTop: 8 },
+  statusBadge: {
+    fontSize: 12,
+    padding: '4px 10px',
+    borderRadius: 12,
+    fontWeight: 500,
+  },
 };
 
 function VerificationDApp(): JSX.Element {
@@ -100,7 +119,6 @@ function VerificationDApp(): JSX.Element {
   const { signMessageAsync } = useSignMessage();
   const [evmConnecting, setEvmConnecting] = useState<boolean>(false);
 
-  const [status, setStatus] = useState<string>('Ready to verify');
   const [loading, setLoading] = useState<boolean>(false);
   const [metaMaskDetected, setMetaMaskDetected] = useState<boolean>(false);
   const [showTermsModal, setShowTermsModal] = useState<boolean>(false);
@@ -132,9 +150,8 @@ function VerificationDApp(): JSX.Element {
       try {
         const provider = await detectConcordiumProvider(2000);
         setConcordiumProvider(provider);
-        setStatus('Ready to verify. Wallets can be connected!');
       } catch (err) {
-        setStatus('⚠️ Concordium Browser Wallet not found. Please install the extension.');
+        console.log('Concordium Browser Wallet not found');
       }
     };
     
@@ -166,13 +183,11 @@ function VerificationDApp(): JSX.Element {
           // If we think we're connected but no accounts available, disconnect
           if (evmConnected && (!accounts || accounts.length === 0)) {
             disconnectEvm();
-            setStatus('⚠️ EVM wallet: Disconnected');
           }
           
           // If wagmi shows connected but MetaMask has no accounts, force disconnect
           if (evmConnected && evmAddress && (!accounts || accounts.length === 0)) {
             disconnectEvm();
-            setStatus('⚠️ EVM wallet: Disconnected - please reconnect');
           }
         }
       } catch (err) {
@@ -186,7 +201,6 @@ function VerificationDApp(): JSX.Element {
     const handleAccountsChanged = (accounts: string[]) => {
       if (accounts.length === 0 && evmConnected) {
         disconnectEvm();
-        setStatus('⚠️ EVM wallet: Disconnected');
       }
     };
 
@@ -200,7 +214,6 @@ function VerificationDApp(): JSX.Element {
     const handleDisconnect = () => {
       if (evmConnected) {
         disconnectEvm();
-        setStatus('⚠️ EVM wallet: Disconnected');
       }
     };
 
@@ -227,14 +240,11 @@ function VerificationDApp(): JSX.Element {
     }
 
     setConcordiumConnecting(true);
-    setStatus('Opening Concordium Browser Wallet...');
     
     try {
       if (!concordiumProvider) {
         throw new Error('Concordium Browser Wallet not detected');
       }
-
-      setStatus('Please approve the connection and select an account in the Concordium Browser Wallet...');
       
       // Use only the standard connect() method to avoid duplicate wallet spawns
       const accountAddress = await concordiumProvider.connect();
@@ -244,18 +254,10 @@ function VerificationDApp(): JSX.Element {
       }
       
       setConcordiumAddress(accountAddress);
-      setStatus(`✅ Concordium wallet connected!\nAccount: ${accountAddress}`);
       
     } catch (err: any) {
       const errorMessage = err?.message || String(err);
-      
-      if (errorMessage.includes('User rejected') || errorMessage.includes('cancelled')) {
-        setStatus('❌ Concordium wallet: Request denied by user');
-      } else if (errorMessage.includes('No account')) {
-        setStatus('❌ Concordium wallet: No account found. Please create an account in the Concordium Browser Wallet');
-      } else {
-        setStatus(`❌ Concordium wallet: ${errorMessage}`);
-      }
+      console.error('Concordium connection error:', errorMessage);
       setConcordiumAddress(null);
     } finally {
       setConcordiumConnecting(false);
@@ -287,8 +289,6 @@ function VerificationDApp(): JSX.Element {
         await new Promise(resolve => setTimeout(resolve, 300));
       }
 
-      setStatus('Opening MetaMask popup...');
-
       // Request wallet_requestPermissions to FORCE the MetaMask popup to appear
       // This ensures the user has to manually approve the connection
       try {
@@ -305,8 +305,6 @@ function VerificationDApp(): JSX.Element {
         console.log('wallet_requestPermissions not supported, using eth_requestAccounts');
       }
 
-      setStatus('Requesting accounts from MetaMask...');
-
       // Now request accounts - this should show the popup if not already shown
       const accounts = await window.ethereum.request({ 
         method: 'eth_requestAccounts' 
@@ -315,8 +313,6 @@ function VerificationDApp(): JSX.Element {
       if (!accounts || accounts.length === 0) {
         throw new Error('No accounts returned from MetaMask');
       }
-
-      setStatus('Connecting wallet...');
 
       // Find MetaMask connector specifically
       const metaMaskConnector = connectors.find(
@@ -330,17 +326,8 @@ function VerificationDApp(): JSX.Element {
       // Now connect using wagmi with the approved accounts
       await connectEvm({ connector: metaMaskConnector });
       
-      setStatus(`✅ MetaMask connected!\nAddress: ${accounts[0]}`);
     } catch (err: any) {
       console.error('MetaMask connection error:', err);
-      
-      if (err?.code === 4001 || err?.message?.includes('User rejected') || err?.message?.includes('User denied')) {
-        setStatus('❌ EVM wallet: Request denied by user');
-      } else if (err?.message?.includes('MetaMask') && err?.message?.includes('not')) {
-        setStatus('❌ EVM wallet: MetaMask not detected. Please install the MetaMask browser extension');
-      } else {
-        setStatus(`❌ EVM wallet: ${err?.message || String(err)}`);
-      }
     } finally {
       setEvmConnecting(false);
     }
@@ -348,11 +335,11 @@ function VerificationDApp(): JSX.Element {
 
   const startVerification = async () => {
     if (!concordiumAddress || !concordiumProvider) {
-      setStatus('❌ Concordium wallet not connected');
+      alert('Please connect your Concordium wallet first');
       return;
     }
     if (!evmConnected || !evmAddress) {
-      setStatus('❌ EVM wallet not connected');
+      alert('Please connect your MetaMask wallet first');
       return;
     }
 
@@ -364,11 +351,7 @@ function VerificationDApp(): JSX.Element {
     setShowTermsModal(false);
     setConcordiumTermsSignature(concordiumSig);
     setEvmTermsSignature(evmSig);
-    setStatus('✅ Both wallets signed and verified!\n\nProceeding with identity verification...');
     setLoading(true);
-
-    // Wait a moment to show the success message
-    await new Promise(resolve => setTimeout(resolve, 1500));
 
     // Proceed with identity verification
     await proceedWithIdentityVerification();
@@ -376,7 +359,6 @@ function VerificationDApp(): JSX.Element {
 
   const handleTermsCancelled = () => {
     setShowTermsModal(false);
-    setStatus('Verification cancelled. You must accept terms to continue.');
   };
 
   const proceedWithIdentityVerification = async () => {
@@ -405,7 +387,6 @@ function VerificationDApp(): JSX.Element {
       ];
 
       // Get challenge from backend
-      setStatus('Requesting challenge from backend...');
       const challengeResponse = await fetch('/api/challenge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -417,8 +398,6 @@ function VerificationDApp(): JSX.Element {
 
       const challengeData = await challengeResponse.json();
       const { challenge, sessionId } = challengeData;
-
-      setStatus('Waiting for Concordium proof...');
 
       let concordiumProof: any = null;
 
@@ -432,19 +411,14 @@ function VerificationDApp(): JSX.Element {
           throw new Error('No proof returned from wallet');
         }
 
-        setStatus('Proof received. Requesting EVM signature...');
       } catch (err: any) {
         throw new Error(`Concordium proof failed: ${err?.message || String(err)}`);
       }
-
-      setStatus('Waiting for EVM signature...');
 
       const message = `I am proving ownership of this address for Concordium ID verification: ${evmAddress}`;
       const evmSignature = await signMessageAsync({ message }).catch((e: any) => {
         throw new Error(`EVM signature failed: ${e?.message || String(e)}`);
       });
-
-      setStatus('Sending to verification service...');
 
       const payload = {
         concordiumProof,
@@ -463,14 +437,14 @@ function VerificationDApp(): JSX.Element {
       });
 
       if (resp.ok) {
-        setStatus('✅ Verification successful!\n\n' + JSON.stringify(payload, null, 2));
         setVerificationComplete(true);
       } else {
         const text = await resp.text().catch(() => 'Unknown error');
         throw new Error(`Service error: ${resp.status} ${text}`);
       }
     } catch (err: any) {
-      setStatus(`❌ Error: ${err?.message || String(err)}`);
+      console.error('Verification error:', err);
+      alert(`Verification failed: ${err?.message || String(err)}`);
     } finally {
       setLoading(false);
     }
@@ -490,19 +464,30 @@ function VerificationDApp(): JSX.Element {
 
       <div style={styles.card}>
         <div style={styles.header}>
-          <h1 style={{ margin: '0 0 8px 0', color: '#111827' }}>VeriLoan</h1>
-          <h2 style={{ margin: '0 0 8px 0', fontSize: 20, fontWeight: 600, color: '#2563eb' }}>
+          <h1 style={{ margin: '0 0 12px 0', fontSize: 32, color: '#59ff00', fontWeight: 700, textShadow: '0 0 20px rgba(89, 255, 0, 0.5)' }}>VeriLoan</h1>
+          <h2 style={{ margin: '0 0 8px 0', fontSize: 18, fontWeight: 600, color: '#59ff00' }}>
             Cross-Chain Identity Verification
           </h2>
-          <p style={{ margin: 0, color: '#6b7280', fontSize: 14 }}>
-            Connect Concordium and your EVM wallet to start verification
+          <p style={{ margin: 0, color: '#9ca3af', fontSize: 15 }}>
+            Connect both wallets to start verification
           </p>
         </div>
 
-        <hr style={{ border: 'none', borderTop: '1px solid #e5e7eb', margin: '8px 0' }} />
+        <hr style={{ border: 'none', borderTop: '1px solid rgba(89, 255, 0, 0.2)', margin: '20px 0' }} />
 
         <div style={styles.section}>
-          <div style={styles.label}>1. Concordium Wallet</div>
+          <div style={styles.label}>
+            <span>1. Concordium Wallet</span>
+            {concordiumProvider ? (
+              <span style={{ ...styles.statusBadge, background: 'rgba(89, 255, 0, 0.2)', color: '#59ff00', border: '1px solid rgba(89, 255, 0, 0.4)' }}>
+                ✓ Detected
+              </span>
+            ) : (
+              <span style={{ ...styles.statusBadge, background: 'rgba(255, 0, 0, 0.15)', color: '#ff4444', border: '1px solid rgba(255, 0, 0, 0.3)' }}>
+                Not Detected
+              </span>
+            )}
+          </div>
           <div style={styles.row}>
             <button
               style={{
@@ -512,26 +497,40 @@ function VerificationDApp(): JSX.Element {
               onClick={onConnectConcordium}
               disabled={!!concordiumAddress || loading || concordiumConnecting || !concordiumProvider}
             >
-              {concordiumConnecting ? '⏳ Opening Wallet...' : concordiumAddress ? '✅ Concordium Connected' : '🔐 Connect Concordium Wallet'}
+              {concordiumConnecting ? '⏳ Opening Wallet...' : concordiumAddress ? '✅ Connected' : '🔐 Connect Concordium'}
             </button>
           </div>
           {concordiumAddress && (
-            <>
-              <div style={styles.addressText}>Account: {concordiumAddress}</div>
-              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 8, padding: 8, background: '#f3f4f6', borderRadius: 6 }}>
-                <strong>💡 To change accounts:</strong> Open the Concordium Browser Wallet extension → Select a different account → Then click the connect button above again
-              </div>
-            </>
+            <div style={styles.addressText}>{concordiumAddress}</div>
           )}
           {!concordiumProvider && (
-            <div style={{ ...styles.addressText, color: '#dc2626', marginTop: 4 }}>
-              ⚠️ Concordium Browser Wallet not detected
+            <div style={{ fontSize: 13, color: '#ff4444', textAlign: 'center', marginTop: 8 }}>
+              Please install{' '}
+              <a 
+                href="https://chrome.google.com/webstore/detail/concordium-wallet/mnnkpffndmickbiakofclnpoiajlegmg" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                style={{ color: '#59ff00', textDecoration: 'underline' }}
+              >
+                Concordium Browser Wallet
+              </a>
             </div>
           )}
         </div>
 
         <div style={styles.section}>
-          <div style={styles.label}>2. EVM Wallet (MetaMask)</div>
+          <div style={styles.label}>
+            <span>2. EVM Wallet (MetaMask)</span>
+            {metaMaskDetected ? (
+              <span style={{ ...styles.statusBadge, background: 'rgba(89, 255, 0, 0.2)', color: '#59ff00', border: '1px solid rgba(89, 255, 0, 0.4)' }}>
+                ✓ Detected
+              </span>
+            ) : (
+              <span style={{ ...styles.statusBadge, background: 'rgba(255, 0, 0, 0.15)', color: '#ff4444', border: '1px solid rgba(255, 0, 0, 0.3)' }}>
+                Not Detected
+              </span>
+            )}
+          </div>
           <div style={styles.row}>
             <button
               style={{
@@ -541,21 +540,31 @@ function VerificationDApp(): JSX.Element {
               onClick={onConnectEvm}
               disabled={evmConnected || loading || evmConnecting || !metaMaskDetected}
             >
-              {evmConnecting ? '⏳ Opening Wallet...' : evmConnected ? '✅ MetaMask Connected' : '🦊 Connect MetaMask'}
+              {evmConnecting ? '⏳ Opening Wallet...' : evmConnected ? '✅ Connected' : '🦊 Connect MetaMask'}
             </button>
           </div>
           {evmConnected && evmAddress && (
-            <div style={styles.addressText}>Address: {evmAddress}</div>
+            <div style={styles.addressText}>{evmAddress}</div>
           )}
           {!metaMaskDetected && (
-            <div style={{ ...styles.addressText, color: '#dc2626', marginTop: 4 }}>
-              ⚠️ MetaMask extension not detected
+            <div style={{ fontSize: 13, color: '#ff4444', textAlign: 'center', marginTop: 8 }}>
+              Please install{' '}
+              <a 
+                href="https://metamask.io/download/" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                style={{ color: '#59ff00', textDecoration: 'underline' }}
+              >
+                MetaMask Extension
+              </a>
             </div>
           )}
         </div>
 
         <div style={styles.section}>
-          <div style={styles.label}>3. Start Verification</div>
+          <div style={styles.label}>
+            <span>3. Start Verification</span>
+          </div>
           <div style={styles.row}>
             <button
               style={{
@@ -568,66 +577,24 @@ function VerificationDApp(): JSX.Element {
               {loading ? '⏳ Processing...' : 'Start Verification'}
             </button>
           </div>
-        </div>
-
-        <div style={styles.section}>
-          <div style={styles.label}>Status</div>
-          <div style={styles.statusBox}>{status}</div>
-        </div>
-
-        <div style={{ marginTop: 16, padding: 12, background: '#e0f2fe', borderRadius: 8, fontSize: 13 }}>
-          <strong>ℹ️ Wallet Detection Status:</strong>
-          <br />
-          • Concordium: {concordiumProvider ? '✅ Detected' : '❌ Not Detected'}
-          <br />
-          • MetaMask: {metaMaskDetected ? '✅ Detected' : '❌ Not Detected'}
-          
-          {(!concordiumProvider || !metaMaskDetected) && (
-            <>
-              <br /><br />
-              <strong>⚠️ Missing Wallets:</strong>
-              {!concordiumProvider && (
-                <>
-                  <br />
-                  → Install{' '}
-                  <a 
-                    href="https://chrome.google.com/webstore/detail/concordium-wallet/mnnkpffndmickbiakofclnpoiajlegmg" 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    style={{ color: '#2563eb', textDecoration: 'underline' }}
-                  >
-                    Concordium Browser Wallet
-                  </a>
-                </>
-              )}
-              {!metaMaskDetected && (
-                <>
-                  <br />
-                  → Install{' '}
-                  <a 
-                    href="https://metamask.io/download/" 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    style={{ color: '#2563eb', textDecoration: 'underline' }}
-                  >
-                    MetaMask Extension
-                  </a>
-                </>
-              )}
-            </>
+          {verificationComplete && (
+            <div style={{ marginTop: 12, padding: 16, background: 'rgba(89, 255, 0, 0.15)', borderRadius: 8, fontSize: 15, color: '#59ff00', fontWeight: 500, textAlign: 'center', border: '1px solid rgba(89, 255, 0, 0.3)' }}>
+              ✅ Verification successful! Generate your report below.
+            </div>
           )}
         </div>
-      </div>
 
-      {/* Report Component - Shows after successful verification */}
-      {verificationComplete && concordiumAddress && (
-        <div style={{ marginTop: '24px', width: '100%', maxWidth: 900 }}>
-          <ReportComponent 
-            concordiumAddress={concordiumAddress}
-            backendUrl="http://localhost:8000"
-          />
-        </div>
-      )}
+        {/* Report Component - Shows after successful verification */}
+        {verificationComplete && concordiumAddress && (
+          <div style={{ marginTop: 8 }}>
+            <hr style={{ border: 'none', borderTop: '1px solid rgba(89, 255, 0, 0.2)', margin: '20px 0' }} />
+            <ReportComponent 
+              concordiumAddress={concordiumAddress}
+              backendUrl="http://localhost:8000"
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
