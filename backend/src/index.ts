@@ -10,7 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { verifyMessage } from 'ethers';
 import { verifyConcordiumProof, generateChallenge, isValidProofStructure } from './verifier.js';
 import * as db from './database.js';
-import envioRoutes from './routes/envio-routes.js';
+import hasuraRoutes from './routes/hasura-routes.js';
 
 // Load environment variables
 dotenv.config();
@@ -69,9 +69,9 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 /**
- * Mount Envio API routes
+ * Mount Hasura API routes
  */
-app.use('/api/envio', envioRoutes);
+app.use('/api/hasura', hasuraRoutes);
 
 /**
  * Generate a new challenge for ZKP request
@@ -552,6 +552,225 @@ app.get('/api/stats', async (_req: Request, res: Response) => {
   }
 });
 
+/**
+ * Generate User Report with Identity + DeFi Data
+ * POST /api/report/:concordiumAddress
+ * Fetches user identity from MongoDB and DeFi data from Hasura GraphQL
+ */
+app.post('/api/report/:concordiumAddress', async (req: Request, res: Response) => {
+  try {
+    const { concordiumAddress } = req.params;
+
+    console.log('');
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log('📊 REPORT GENERATION REQUEST');
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log('Concordium Address:', concordiumAddress);
+    console.log('Timestamp:', new Date().toISOString());
+
+    // Step 1: Fetch user identity from MongoDB
+    console.log('');
+    console.log('🔍 Step 1: Fetching user identity from MongoDB...');
+    const pairing = await db.getPairingByConcordium(concordiumAddress);
+
+    if (!pairing) {
+      console.log('❌ No wallet pairing found for this Concordium address');
+      return res.status(404).json({
+        success: false,
+        error: 'No wallet pairing found for this Concordium address',
+        message: 'User must complete identity verification first'
+      });
+    }
+
+    console.log('✅ User identity found:');
+    console.log('   - First Name:', pairing.verifiedAttributes.firstName || 'Not provided');
+    console.log('   - Last Name:', pairing.verifiedAttributes.lastName || 'Not provided');
+    console.log('   - Nationality:', pairing.verifiedAttributes.nationality || 'Not provided');
+    console.log('   - Age Verified (18+):', pairing.verifiedAttributes.ageVerified ? 'YES' : 'NO');
+    console.log('   - Paired EVM Addresses:', pairing.evmAddresses.length);
+    pairing.evmAddresses.forEach((addr, idx) => {
+      console.log(`     ${idx + 1}. ${addr}`);
+    });
+
+    // Step 2: Fetch DeFi data from Hasura GraphQL for all paired EVM addresses
+    console.log('');
+    console.log('🔍 Step 2: Querying Hasura GraphQL for DeFi lending data...');
+    console.log('   Hasura Endpoint:', process.env.HASURA_ENDPOINT || 'http://localhost:8080/v1/graphql');
+
+    const { getHasuraClient } = await import('./hasura-client.js');
+    const hasuraClient = getHasuraClient();
+
+    // Aggregate data from all paired EVM addresses
+    const allLoans: any[] = [];
+    const allRepayments: any[] = [];
+    const allLiquidations: any[] = [];
+    let totalActiveLoans = 0;
+    let totalBorrowedUSD = BigInt(0);
+    let totalRepaidUSD = BigInt(0);
+    let totalLiquidatedUSD = BigInt(0);
+
+    for (const evmAddress of pairing.evmAddresses) {
+      console.log('');
+      console.log(`   📍 Querying for EVM address: ${evmAddress}`);
+
+      try {
+        // Query loans
+        console.log('      - Fetching loans from GraphQL...');
+        const loans = await hasuraClient.getUserLoans(evmAddress);
+        console.log(`      ✅ Found ${loans.length} loan records`);
+        if (loans.length > 0) {
+          loans.forEach((loan, idx) => {
+            console.log(`         ${idx + 1}. Protocol: ${loan.protocol}, Asset: ${loan.asset}, Amount: $${loan.amountUSD}, Active: ${loan.isActive}`);
+          });
+        }
+        allLoans.push(...loans);
+        totalActiveLoans += loans.filter(l => l.isActive).length;
+        totalBorrowedUSD += loans.reduce((sum, l) => sum + BigInt(l.amountUSD || '0'), BigInt(0));
+
+        // Query repayments
+        console.log('      - Fetching repayments from GraphQL...');
+        const repayments = await hasuraClient.getUserRepayments(evmAddress);
+        console.log(`      ✅ Found ${repayments.length} repayment records`);
+        if (repayments.length > 0) {
+          repayments.forEach((rep, idx) => {
+            console.log(`         ${idx + 1}. Protocol: ${rep.protocol}, Asset: ${rep.asset}, Amount: $${rep.amountUSD}`);
+          });
+        }
+        allRepayments.push(...repayments);
+        totalRepaidUSD += repayments.reduce((sum, r) => sum + BigInt(r.amountUSD || '0'), BigInt(0));
+
+        // Query liquidations
+        console.log('      - Fetching liquidations from GraphQL...');
+        const liquidations = await hasuraClient.getUserLiquidations(evmAddress);
+        console.log(`      ✅ Found ${liquidations.length} liquidation records`);
+        if (liquidations.length > 0) {
+          liquidations.forEach((liq, idx) => {
+            console.log(`         ${idx + 1}. Protocol: ${liq.protocol}, Collateral: ${liq.collateralAsset}, Debt: ${liq.debtAsset}, Liquidated: $${liq.liquidatedCollateralUSD}`);
+          });
+        }
+        allLiquidations.push(...liquidations);
+        totalLiquidatedUSD += liquidations.reduce((sum, l) => sum + BigInt(l.liquidatedCollateralUSD || '0'), BigInt(0));
+
+      } catch (error: any) {
+        console.log(`      ⚠️  Error querying Hasura for ${evmAddress}:`, error.message);
+        console.log(`      → Continuing with zero values for this address`);
+      }
+    }
+
+    // Calculate metrics
+    const currentDebtUSD = totalBorrowedUSD - totalRepaidUSD;
+    const healthFactor = currentDebtUSD > BigInt(0) ? 'At Risk' : 'Healthy';
+
+    console.log('');
+    console.log('📊 AGGREGATED DEFI DATA SUMMARY:');
+    console.log('   - Total Loans Found:', allLoans.length);
+    console.log('   - Active Loans:', totalActiveLoans);
+    console.log('   - Total Borrowed (USD):', totalBorrowedUSD.toString());
+    console.log('   - Total Repayments:', allRepayments.length);
+    console.log('   - Total Repaid (USD):', totalRepaidUSD.toString());
+    console.log('   - Total Liquidations:', allLiquidations.length);
+    console.log('   - Total Liquidated (USD):', totalLiquidatedUSD.toString());
+    console.log('   - Current Debt (USD):', currentDebtUSD.toString());
+    console.log('   - Health Status:', healthFactor);
+
+    // Build report response
+    const report = {
+      success: true,
+      generatedAt: new Date().toISOString(),
+      concordiumAddress,
+
+      // User Identity Information
+      userIdentity: {
+        firstName: pairing.verifiedAttributes.firstName || 'N/A',
+        lastName: pairing.verifiedAttributes.lastName || 'N/A',
+        fullName: `${pairing.verifiedAttributes.firstName || ''} ${pairing.verifiedAttributes.lastName || ''}`.trim() || 'N/A',
+        nationality: pairing.verifiedAttributes.nationality || 'N/A',
+        ageVerified18Plus: pairing.verifiedAttributes.ageVerified || false,
+        verificationDate: pairing.createdAt,
+      },
+
+      // Paired Wallets
+      pairedWallets: {
+        count: pairing.evmAddresses.length,
+        addresses: pairing.evmAddresses,
+      },
+
+      // DeFi Lending Data (from Hasura GraphQL)
+      defiData: {
+        loans: {
+          total: allLoans.length,
+          active: totalActiveLoans,
+          inactive: allLoans.length - totalActiveLoans,
+          totalBorrowedUSD: totalBorrowedUSD.toString(),
+          positions: allLoans.map(loan => ({
+            protocol: loan.protocol,
+            asset: loan.asset,
+            amount: loan.amount,
+            amountUSD: loan.amountUSD,
+            isActive: loan.isActive,
+            timestamp: loan.timestamp,
+          })),
+        },
+        repayments: {
+          total: allRepayments.length,
+          totalRepaidUSD: totalRepaidUSD.toString(),
+          history: allRepayments.map(rep => ({
+            protocol: rep.protocol,
+            asset: rep.asset,
+            amount: rep.amount,
+            amountUSD: rep.amountUSD,
+            timestamp: rep.timestamp,
+          })),
+        },
+        liquidations: {
+          total: allLiquidations.length,
+          totalLiquidatedUSD: totalLiquidatedUSD.toString(),
+          events: allLiquidations.map(liq => ({
+            protocol: liq.protocol,
+            collateralAsset: liq.collateralAsset,
+            debtAsset: liq.debtAsset,
+            liquidatedCollateralUSD: liq.liquidatedCollateralUSD,
+            timestamp: liq.timestamp,
+          })),
+        },
+        metrics: {
+          currentDebtUSD: currentDebtUSD.toString(),
+          ltvRatio: totalActiveLoans > 0 ? 'Calculated per loan' : 'N/A',
+          healthFactor,
+        },
+      },
+
+      // Data Source Information
+      dataSources: {
+        identity: 'MongoDB (verified via Concordium ZKP)',
+        defiData: 'Hasura GraphQL API (PostgreSQL)',
+        hasuraEndpoint: process.env.HASURA_ENDPOINT || 'http://localhost:8080/v1/graphql',
+      },
+    };
+
+    console.log('');
+    console.log('✅ REPORT GENERATION COMPLETED');
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log('');
+
+    res.json(report);
+
+  } catch (error: any) {
+    console.error('');
+    console.error('❌ REPORT GENERATION FAILED');
+    console.error('Error:', error.message);
+    console.error('═══════════════════════════════════════════════════════════');
+    console.error('');
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate report',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Error handling middleware
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Error:', err);
@@ -587,15 +806,16 @@ async function startServer() {
     console.log('  POST /api/verify-evm-terms-acceptance');
     console.log('  GET  /api/pairing/:address');
     console.log('  GET  /api/stats');
+    console.log('  POST /api/report/:concordiumAddress');
     console.log('  GET  /api/verification-status/:id');
     console.log('');
-    console.log('Envio Integration Endpoints:');
-    console.log('  GET  /api/envio/health');
-    console.log('  GET  /api/envio/loans/:evmAddress');
-    console.log('  GET  /api/envio/repayments/:evmAddress');
-    console.log('  GET  /api/envio/liquidations/:evmAddress');
-    console.log('  GET  /api/envio/summary/:evmAddress');
-    console.log('  GET  /api/envio/paired-wallet/:concordiumAddress');
+    console.log('Hasura Integration Endpoints:');
+    console.log('  GET  /api/hasura/health');
+    console.log('  GET  /api/hasura/loans/:evmAddress');
+    console.log('  GET  /api/hasura/repayments/:evmAddress');
+    console.log('  GET  /api/hasura/liquidations/:evmAddress');
+    console.log('  GET  /api/hasura/summary/:evmAddress');
+    console.log('  GET  /api/hasura/paired-wallet/:concordiumAddress');
     console.log('');
   });
 
