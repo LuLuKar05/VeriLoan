@@ -8,9 +8,9 @@
     "backend"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace=frontend",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\" --names \"backend,frontend\" --prefix-colors \"blue,green\"",
+    "dev:frontend": "npm run dev --workspace=frontend",
     "dev:backend": "npm run dev --workspace=backend",
-    "dev:all": "npm run dev:backend & npm run dev",
     "build": "npm run build --workspace=frontend && npm run build --workspace=backend",
     "build:frontend": "npm run build --workspace=frontend",
     "build:backend": "npm run build --workspace=backend",
@@ -25,12 +25,16 @@
     "identity-verification",
     "zkp",
     "zero-knowledge-proof",
-    "blockchain"
+    "blockchain",
+    "defi"
   ],
   "author": "",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/LuLuKar05/VeriLoan.git"
+    "url": "https://github.com/Ei-Sandi/VeriLoan-Poc.git"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }

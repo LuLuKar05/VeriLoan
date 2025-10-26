@@ -192,7 +192,17 @@ export async function verifyConcordiumProof(
     try {
       const modernProof = proofResult as any;
 
+      console.log('🔍 Checking proof format...');
+      console.log('   isModernFormat:', isModernFormat);
+      console.log('   Has verifiableCredential:', !!modernProof.verifiableCredential);
+      console.log('   Has proof array:', Array.isArray((proofResult as any).proof));
+
+      // Log the full proof structure (first 2000 chars)
+      const proofStr = JSON.stringify(proofResult, null, 2);
+      console.log('🔍 Proof structure (truncated):', proofStr.substring(0, 2000));
+
       if (isModernFormat && modernProof.verifiableCredential && modernProof.verifiableCredential[0]) {
+        console.log('📄 Using MODERN format extraction');
         // Extract from modern format
         const credential = modernProof.verifiableCredential[0];
 
@@ -203,7 +213,18 @@ export async function verifyConcordiumProof(
             for (const item of proofValue) {
               if (item.attribute && item.proof) {
                 // Revealed attribute with value
-                revealedAttributes[item.attribute] = item.attribute;
+                const attributeValue = item.attribute;
+
+                // Map Concordium attribute tags to our schema
+                const tagMapping: Record<string, string> = {
+                  'firstName': 'firstName',
+                  'lastName': 'lastName',
+                  'nationality': 'nationality',
+                  'countryOfResidence': 'nationality',
+                };
+
+                const mappedKey = tagMapping[item.attributeTag || item.attribute] || item.attribute;
+                revealedAttributes[mappedKey] = attributeValue;
               }
             }
           }
@@ -214,6 +235,11 @@ export async function verifyConcordiumProof(
           for (const item of credential.credentialSubject.statement) {
             if (item.type === 'AttributeInRange' && item.attributeTag) {
               revealedAttributes[`${item.attributeTag}_verified`] = true;
+
+              // Special handling for date of birth (age verification)
+              if (item.attributeTag === 'dob') {
+                revealedAttributes['ageVerified'] = true;
+              }
             }
             if (item.type === 'AttributeInSet' && item.attributeTag) {
               revealedAttributes[`${item.attributeTag}_verified`] = true;
@@ -221,16 +247,81 @@ export async function verifyConcordiumProof(
           }
         }
       } else if (!isModernFormat) {
+        console.log('📄 Using LEGACY format extraction');
         // Extract from legacy format
         const legacyProof = proofResult as any;
         if (Array.isArray(legacyProof.proof)) {
           const proofData = legacyProof.proof[0];
 
+          console.log('📋 Extracting attributes from proof data...');
+          console.log('   Statement items:', proofData?.statement?.length || 0);
+          console.log('   Has revealedAttributes?:', !!proofData?.revealedAttributes);
+          console.log('   Revealed attributes keys:', Object.keys(proofData?.revealedAttributes || {}));
+
+          // Log full revealedAttributes object
+          if (proofData?.revealedAttributes) {
+            console.log('   Full revealedAttributes:', JSON.stringify(proofData.revealedAttributes, null, 2));
+          }
+
           if (proofData && proofData.statement) {
-            for (const item of proofData.statement) {
+            console.log('   Processing statement items...');
+
+            // Keep track of revealed attribute values by their position in statement
+            const revealedByPosition: Array<{ tag: string, value: any }> = [];
+
+            for (let i = 0; i < proofData.statement.length; i++) {
+              const item = proofData.statement[i];
+              console.log(`   → Statement[${i}] type: ${item.type}, attributeTag: ${item.attributeTag}`);
+
               if (item.type === 'RevealAttribute' && item.attributeTag) {
-                if (proofData.revealedAttributes && proofData.revealedAttributes[item.attributeTag]) {
-                  revealedAttributes[item.attributeTag] = proofData.revealedAttributes[item.attributeTag];
+                console.log(`      Checking for revealed value in proofData.revealedAttributes['${item.attributeTag}']`);
+
+                // Check if revealedAttributes exists and has data
+                if (proofData.revealedAttributes) {
+                  // Try to get value by attributeTag
+                  let attributeValue = proofData.revealedAttributes[item.attributeTag];
+
+                  // If not found by tag, the value might be using the actual attribute value as key
+                  // In that case, we need to find it by position
+                  if (!attributeValue) {
+                    const revealedKeys = Object.keys(proofData.revealedAttributes);
+                    console.log(`      RevealedAttributes keys:`, revealedKeys);
+
+                    // Count how many RevealAttribute items we've seen so far
+                    const revealAttributeIndex = revealedByPosition.length;
+                    if (revealAttributeIndex < revealedKeys.length) {
+                      // Use the key at this position
+                      const keyAtPosition = revealedKeys[revealAttributeIndex];
+                      attributeValue = proofData.revealedAttributes[keyAtPosition];
+                      console.log(`      Using value at position ${revealAttributeIndex}: ${keyAtPosition} = ${attributeValue}`);
+                    }
+                  }
+
+                  if (attributeValue) {
+                    console.log(`   ✓ Found revealed attribute: ${item.attributeTag} = ${attributeValue}`);
+
+                    // Map Concordium attribute tags to our schema
+                    const tagMapping: Record<string, string> = {
+                      'firstName': 'firstName',
+                      'lastName': 'lastName',
+                      'nationality': 'nationality',
+                      'countryOfResidence': 'nationality', // Alternative tag
+                      'nationalIdNo': 'nationalIdNo',
+                      'idDocType': 'idDocType',
+                      'idDocNo': 'idDocNo',
+                      'idDocIssuer': 'idDocIssuer',
+                      'idDocIssuedAt': 'idDocIssuedAt',
+                      'idDocExpiresAt': 'idDocExpiresAt',
+                      'taxIdNo': 'taxIdNo',
+                    };
+
+                    const mappedKey = tagMapping[item.attributeTag] || item.attributeTag;
+                    revealedAttributes[mappedKey] = attributeValue;
+                  } else {
+                    console.log(`   ✗ No value found for ${item.attributeTag} in revealedAttributes`);
+                  }
+                } else {
+                  console.log(`      No revealedAttributes object found`);
                 }
               }
 
@@ -240,6 +331,11 @@ export async function verifyConcordiumProof(
                   lower: item.lower,
                   upper: item.upper
                 };
+
+                // Special handling for date of birth (age verification)
+                if (item.attributeTag === 'dob') {
+                  revealedAttributes['ageVerified'] = true;
+                }
               }
 
               if (item.type === 'AttributeInSet' && item.attributeTag) {
@@ -254,6 +350,9 @@ export async function verifyConcordiumProof(
     } catch (extractError: any) {
       console.warn('Error extracting attributes:', extractError);
     }
+
+    console.log('📊 Final extracted attributes:', revealedAttributes);
+    console.log('📊 Attribute count:', Object.keys(revealedAttributes).length);
 
     return {
       isValid: true,

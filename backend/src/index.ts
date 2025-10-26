@@ -10,7 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { verifyMessage } from 'ethers';
 import { verifyConcordiumProof, generateChallenge, isValidProofStructure } from './verifier.js';
 import * as db from './database.js';
-import envioRoutes from './routes/envio-routes.js';
+import hasuraRoutes from './routes/hasura-routes.js';
 
 // Load environment variables
 dotenv.config();
@@ -69,9 +69,9 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 /**
- * Mount Envio API routes
+ * Mount Hasura API routes
  */
-app.use('/api/envio', envioRoutes);
+app.use('/api/hasura', hasuraRoutes);
 
 /**
  * Generate a new challenge for ZKP request
@@ -139,11 +139,7 @@ app.post('/api/verify-identity', async (req: Request, res: Response) => {
       ? concordiumProof
       : JSON.stringify(concordiumProof);
 
-    console.log('Received Concordium Proof:', proofJson.substring(0, 500) + '...');
-    console.log('Proof keys:', Object.keys(JSON.parse(proofJson)));
-
     if (!isValidProofStructure(proofJson)) {
-      console.log('❌ Invalid proof structure detected');
       return res.status(400).json({
         success: false,
         error: 'Invalid proof structure',
@@ -160,6 +156,12 @@ app.post('/api/verify-identity', async (req: Request, res: Response) => {
       challenge
     });
 
+    console.log('✅ Verification result:', {
+      isValid: verificationResult.isValid,
+      hasAttributes: !!verificationResult.revealedAttributes,
+      attributes: verificationResult.revealedAttributes
+    });
+
     if (!verificationResult.isValid) {
       return res.status(400).json({
         success: false,
@@ -167,17 +169,42 @@ app.post('/api/verify-identity', async (req: Request, res: Response) => {
       });
     }
 
+    // Extract attributes - handle case where attribute values are used as keys
+    // The Concordium proof might have structure like: { "Mark": "Mark", "ZuZu": "ZuZu", "DK": "DK" }
+    // We need to map these based on the order/position to firstName, lastName, nationality
+    const attrs = verificationResult.revealedAttributes || {};
+    const attrKeys = Object.keys(attrs).filter(k => !k.includes('_verified') && k !== 'ageVerified');
+
+    console.log('📋 Extracted attribute keys:', attrKeys);
+
+    // Try to intelligently map or use direct keys if they exist
+    const firstName = attrs.firstName || attrs.Mark || attrKeys[0] && attrs[attrKeys[0]] || undefined;
+    const lastName = attrs.lastName || attrs.ZuZu || attrKeys[1] && attrs[attrKeys[1]] || undefined;
+    const nationality = attrs.nationality || attrs.DK || attrKeys[2] && attrs[attrKeys[2]] || undefined;
+
     // Create or update wallet pairing in database
+    console.log('💾 Storing attributes in database:', {
+      firstName,
+      lastName,
+      nationality,
+      ageVerified: attrs.ageVerified || true,
+    });
+
     const pairing = await db.createOrUpdatePairing(
       concordiumAddress,
       evmAddress,
       {
-        firstName: verificationResult.revealedAttributes?.firstName,
-        lastName: verificationResult.revealedAttributes?.lastName,
-        nationality: verificationResult.revealedAttributes?.nationality,
-        ageVerified: true, // Verified via date of birth proof
+        firstName,
+        lastName,
+        nationality,
+        ageVerified: attrs.ageVerified || true,
       }
     );
+
+    console.log('💾 Stored pairing:', {
+      pairingId: pairing.pairingId,
+      verifiedAttributes: pairing.verifiedAttributes
+    });
 
     // Mark terms acceptance in database
     if (concordiumTermsAcceptance) {
@@ -187,12 +214,7 @@ app.post('/api/verify-identity', async (req: Request, res: Response) => {
       await db.markEvmTermsAccepted(concordiumAddress, evmAddress);
     }
 
-    console.log('✅ Wallet pairing created/updated:', {
-      pairingId: pairing.pairingId,
-      concordiumAddress: pairing.concordiumAddress,
-      evmAddresses: pairing.evmAddresses,
-      totalPairings: pairing.evmAddresses.length
-    });
+    console.log('✅ Wallet pairing created/updated');
 
     const response = {
       success: true,
@@ -260,15 +282,6 @@ app.post('/api/verify-terms-acceptance', async (req: Request, res: Response) => 
   try {
     const { signature, message, termsVersion, termsHash, accountAddress, timestamp } = req.body;
 
-    console.log('Terms verification request received:');
-    console.log('- Account Address:', accountAddress);
-    console.log('- Terms Version:', termsVersion);
-    console.log('- Terms Hash:', termsHash);
-    console.log('- Timestamp:', timestamp);
-    console.log('- Message:', message);
-    console.log('- Signature type:', typeof signature);
-    console.log('- Signature structure:', JSON.stringify(signature, null, 2));
-
     // Check for missing fields
     if (!signature || !message || !termsVersion || !termsHash || !accountAddress || !timestamp) {
       const missingFields = [];
@@ -279,7 +292,6 @@ app.post('/api/verify-terms-acceptance', async (req: Request, res: Response) => 
       if (!accountAddress) missingFields.push('accountAddress');
       if (!timestamp) missingFields.push('timestamp');
 
-      console.log('❌ Missing required fields:', missingFields);
       return res.status(400).json({
         success: false,
         error: 'Missing required fields',
@@ -291,7 +303,6 @@ app.post('/api/verify-terms-acceptance', async (req: Request, res: Response) => 
     // Validate terms version
     const CURRENT_TERMS_VERSION = '1.0';
     if (termsVersion !== CURRENT_TERMS_VERSION) {
-      console.log(`❌ Invalid terms version: ${termsVersion} (expected ${CURRENT_TERMS_VERSION})`);
       return res.status(400).json({
         success: false,
         error: `Invalid terms version. Current version is ${CURRENT_TERMS_VERSION}`,
@@ -306,7 +317,6 @@ app.post('/api/verify-terms-acceptance', async (req: Request, res: Response) => 
     const oneMinuteAhead = now + (60 * 1000);
 
     if (isNaN(signatureTime)) {
-      console.log('❌ Invalid timestamp format:', timestamp);
       return res.status(400).json({
         success: false,
         error: 'Invalid timestamp format',
@@ -315,7 +325,6 @@ app.post('/api/verify-terms-acceptance', async (req: Request, res: Response) => 
     }
 
     if (signatureTime < fiveMinutesAgo) {
-      console.log('❌ Terms signature has expired');
       return res.status(400).json({
         success: false,
         error: 'Terms signature has expired. Please sign again.',
@@ -324,7 +333,6 @@ app.post('/api/verify-terms-acceptance', async (req: Request, res: Response) => 
     }
 
     if (signatureTime > oneMinuteAhead) {
-      console.log('❌ Timestamp is in the future');
       return res.status(400).json({
         success: false,
         error: 'Invalid timestamp',
@@ -359,8 +367,6 @@ app.post('/api/verify-terms-acceptance', async (req: Request, res: Response) => 
       validationResults.signatureHasData = hasStandardFormat || hasNestedFormat || Object.keys(signature).length > 0;
     }
 
-    console.log('Validation results:', validationResults);
-
     // Check if all validations passed
     const allChecksPass = Object.values(validationResults).every(v => v === true);
 
@@ -369,7 +375,6 @@ app.post('/api/verify-terms-acceptance', async (req: Request, res: Response) => 
         .filter(([_, value]) => !value)
         .map(([key]) => key);
 
-      console.log('❌ Validation failed. Failed checks:', failedChecks);
       return res.status(400).json({
         success: false,
         error: 'Signature validation failed',
@@ -381,7 +386,7 @@ app.post('/api/verify-terms-acceptance', async (req: Request, res: Response) => 
       });
     }
 
-    console.log('✅ Terms verification passed all checks');
+    console.log('✅ Terms accepted');
     res.json({
       success: true,
       verified: true,
@@ -552,6 +557,179 @@ app.get('/api/stats', async (_req: Request, res: Response) => {
   }
 });
 
+/**
+ * Generate User Report with Identity + DeFi Data
+ * POST /api/report/:concordiumAddress
+ * Fetches user identity from MongoDB and DeFi data from Hasura GraphQL
+ */
+app.post('/api/report/:concordiumAddress', async (req: Request, res: Response) => {
+  try {
+    const { concordiumAddress } = req.params;
+
+    console.log('📊 Generating report for:', concordiumAddress);
+
+    // Step 1: Fetch user identity from MongoDB
+    const pairing = await db.getPairingByConcordium(concordiumAddress);
+
+    if (!pairing) {
+      console.log('❌ No wallet pairing found');
+      return res.status(404).json({
+        success: false,
+        error: 'No wallet pairing found for this Concordium address',
+        message: 'User must complete identity verification first'
+      });
+    }
+
+    console.log('✅ User identity found');
+    console.log('📋 Verified attributes from DB:', pairing.verifiedAttributes);
+    console.log('   - firstName:', pairing.verifiedAttributes?.firstName || 'MISSING');
+    console.log('   - lastName:', pairing.verifiedAttributes?.lastName || 'MISSING');
+    console.log('   - nationality:', pairing.verifiedAttributes?.nationality || 'MISSING');
+    console.log('   - ageVerified:', pairing.verifiedAttributes?.ageVerified || false);
+
+    // Step 2: Fetch DeFi data from Hasura GraphQL for all paired EVM addresses
+    const { getHasuraClient } = await import('./hasura-client.js');
+    const hasuraClient = getHasuraClient();
+
+    // Aggregate data from all paired EVM addresses
+    const allLoans: any[] = [];
+    const allRepayments: any[] = [];
+    const allLiquidations: any[] = [];
+    let totalActiveLoans = 0;
+    let totalBorrowedUSD = BigInt(0);
+    let totalRepaidUSD = BigInt(0);
+    let totalLiquidatedUSD = BigInt(0);
+
+    for (const evmAddress of pairing.evmAddresses) {
+      console.log('');
+      console.log(`   📍 Querying for EVM address: ${evmAddress}`);
+
+      try {
+        // Query loans
+        const loans = await hasuraClient.getUserLoans(evmAddress);
+        allLoans.push(...loans);
+        totalActiveLoans += loans.filter(l => l.isActive).length;
+        totalBorrowedUSD += loans.reduce((sum, l) => sum + BigInt(l.amountUSD || '0'), BigInt(0));
+
+        // Query repayments
+        const repayments = await hasuraClient.getUserRepayments(evmAddress);
+        allRepayments.push(...repayments);
+        totalRepaidUSD += repayments.reduce((sum, r) => sum + BigInt(r.amountUSD || '0'), BigInt(0));
+
+        // Query liquidations
+        const liquidations = await hasuraClient.getUserLiquidations(evmAddress);
+        allLiquidations.push(...liquidations);
+        totalLiquidatedUSD += liquidations.reduce((sum, l) => sum + BigInt(l.liquidatedCollateralUSD || '0'), BigInt(0));
+
+      } catch (error: any) {
+        console.log(`⚠️  Error querying Hasura for ${evmAddress}:`, error.message);
+      }
+    }
+
+    // Calculate metrics
+    const currentDebtUSD = totalBorrowedUSD - totalRepaidUSD;
+    const healthFactor = currentDebtUSD > BigInt(0) ? 'At Risk' : 'Healthy';
+
+    console.log('✅ Report generated - Loans:', allLoans.length, 'Repayments:', allRepayments.length, 'Liquidations:', allLiquidations.length);
+
+    // Build report response
+    const report = {
+      success: true,
+      generatedAt: new Date().toISOString(),
+      concordiumAddress,
+
+      // User Identity Information
+      userIdentity: {
+        firstName: pairing.verifiedAttributes.firstName || 'N/A',
+        lastName: pairing.verifiedAttributes.lastName || 'N/A',
+        fullName: `${pairing.verifiedAttributes.firstName || ''} ${pairing.verifiedAttributes.lastName || ''}`.trim() || 'N/A',
+        nationality: pairing.verifiedAttributes.nationality || 'N/A',
+        ageVerified18Plus: pairing.verifiedAttributes.ageVerified || false,
+        verificationDate: pairing.createdAt,
+      },
+
+      // Paired Wallets
+      pairedWallets: {
+        count: pairing.evmAddresses.length,
+        addresses: pairing.evmAddresses,
+      },
+
+      // DeFi Lending Data (from Hasura GraphQL)
+      defiData: {
+        loans: {
+          total: allLoans.length,
+          active: totalActiveLoans,
+          inactive: allLoans.length - totalActiveLoans,
+          totalBorrowedUSD: totalBorrowedUSD.toString(),
+          positions: allLoans.map(loan => ({
+            protocol: loan.protocol,
+            asset: loan.asset,
+            amount: loan.amount,
+            amountUSD: loan.amountUSD,
+            isActive: loan.isActive,
+            timestamp: loan.timestamp,
+          })),
+        },
+        repayments: {
+          total: allRepayments.length,
+          totalRepaidUSD: totalRepaidUSD.toString(),
+          history: allRepayments.map(rep => ({
+            protocol: rep.protocol,
+            asset: rep.asset,
+            amount: rep.amount,
+            amountUSD: rep.amountUSD,
+            timestamp: rep.timestamp,
+          })),
+        },
+        liquidations: {
+          total: allLiquidations.length,
+          totalLiquidatedUSD: totalLiquidatedUSD.toString(),
+          events: allLiquidations.map(liq => ({
+            protocol: liq.protocol,
+            collateralAsset: liq.collateralAsset,
+            debtAsset: liq.debtAsset,
+            liquidatedCollateralUSD: liq.liquidatedCollateralUSD,
+            timestamp: liq.timestamp,
+          })),
+        },
+        metrics: {
+          currentDebtUSD: currentDebtUSD.toString(),
+          ltvRatio: totalActiveLoans > 0 ? 'Calculated per loan' : 'N/A',
+          healthFactor,
+        },
+      },
+
+      // Data Source Information
+      dataSources: {
+        identity: 'MongoDB (verified via Concordium ZKP)',
+        defiData: 'Hasura GraphQL API (PostgreSQL)',
+        hasuraEndpoint: process.env.HASURA_ENDPOINT || 'http://localhost:8080/v1/graphql',
+      },
+    };
+
+    console.log('');
+    console.log('✅ REPORT GENERATION COMPLETED');
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log('');
+
+    res.json(report);
+
+  } catch (error: any) {
+    console.error('');
+    console.error('❌ REPORT GENERATION FAILED');
+    console.error('Error:', error.message);
+    console.error('═══════════════════════════════════════════════════════════');
+    console.error('');
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate report',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Error handling middleware
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Error:', err);
@@ -587,15 +765,16 @@ async function startServer() {
     console.log('  POST /api/verify-evm-terms-acceptance');
     console.log('  GET  /api/pairing/:address');
     console.log('  GET  /api/stats');
+    console.log('  POST /api/report/:concordiumAddress');
     console.log('  GET  /api/verification-status/:id');
     console.log('');
-    console.log('Envio Integration Endpoints:');
-    console.log('  GET  /api/envio/health');
-    console.log('  GET  /api/envio/loans/:evmAddress');
-    console.log('  GET  /api/envio/repayments/:evmAddress');
-    console.log('  GET  /api/envio/liquidations/:evmAddress');
-    console.log('  GET  /api/envio/summary/:evmAddress');
-    console.log('  GET  /api/envio/paired-wallet/:concordiumAddress');
+    console.log('Hasura Integration Endpoints:');
+    console.log('  GET  /api/hasura/health');
+    console.log('  GET  /api/hasura/loans/:evmAddress');
+    console.log('  GET  /api/hasura/repayments/:evmAddress');
+    console.log('  GET  /api/hasura/liquidations/:evmAddress');
+    console.log('  GET  /api/hasura/summary/:evmAddress');
+    console.log('  GET  /api/hasura/paired-wallet/:concordiumAddress');
     console.log('');
   });
 
